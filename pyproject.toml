@@ -1,0 +1,85 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hydrag-core"
+version = "1.0.5"
+description = "HydRAG — Multi-Headed Retrieval-Augmented Generation with CRAG supervision"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [
+    { name = "Studio Playbook Contributors" },
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Indexing",
+    "Typing :: Typed",
+]
+keywords = ["rag", "retrieval", "crag", "hydrag", "llm", "search", "multi-headed", "reciprocal-rank-fusion"]
+
+[project.optional-dependencies]
+chromadb = ["chromadb>=0.4"]
+firecrawl = ["firecrawl-py>=1.0"]
+tune = [
+    "transformers>=4.40",
+    "torch>=2.0",
+    "onnxruntime>=1.17",
+    "numpy>=1.24",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+    "mypy>=1.10",
+]
+
+[project.urls]
+Homepage = "https://github.com/studio-playbook/hydrag-core"
+Documentation = "https://github.com/studio-playbook/hydrag-core#readme"
+Repository = "https://github.com/studio-playbook/hydrag-core"
+Changelog = "https://github.com/studio-playbook/hydrag-core/blob/main/CHANGELOG.md"
+Issues = "https://github.com/studio-playbook/hydrag-core/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hydrag"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/",
+    "tests/",
+    "docs/",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md",
+    "pyproject.toml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
