@@ -2,6 +2,8 @@
 
 import os
 
+import pytest
+
 from hydrag import HydRAGConfig
 
 
@@ -32,55 +34,40 @@ class TestHydRAGConfigDefaults:
 
 
 class TestHydRAGConfigFromEnv:
-    def test_profile_from_env(self, monkeypatch: object) -> None:
-        os.environ["HYDRAG_PROFILE"] = "code"
-        try:
-            cfg = HydRAGConfig.from_env()
-            assert cfg.profile == "code"
-        finally:
-            del os.environ["HYDRAG_PROFILE"]
+    def test_profile_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HYDRAG_PROFILE", "code")
+        cfg = HydRAGConfig.from_env()
+        assert cfg.profile == "code"
 
-    def test_web_fallback_from_env(self) -> None:
-        os.environ["HYDRAG_ENABLE_WEB_FALLBACK"] = "true"
-        try:
-            cfg = HydRAGConfig.from_env()
-            assert cfg.enable_web_fallback is True
-        finally:
-            del os.environ["HYDRAG_ENABLE_WEB_FALLBACK"]
+    def test_web_fallback_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HYDRAG_ENABLE_WEB_FALLBACK", "true")
+        cfg = HydRAGConfig.from_env()
+        assert cfg.enable_web_fallback is True
 
-    def test_rrf_k_from_env(self) -> None:
-        os.environ["HYDRAG_RRF_K"] = "100"
-        try:
-            cfg = HydRAGConfig.from_env()
-            assert cfg.rrf_k == 100
-        finally:
-            del os.environ["HYDRAG_RRF_K"]
+    def test_rrf_k_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HYDRAG_RRF_K", "100")
+        cfg = HydRAGConfig.from_env()
+        assert cfg.rrf_k == 100
 
-    def test_fallback_timeout_from_env(self) -> None:
-        os.environ["HYDRAG_FALLBACK_TIMEOUT_S"] = "2.5"
-        try:
-            cfg = HydRAGConfig.from_env()
-            assert cfg.fallback_timeout_s == 2.5
-        finally:
-            del os.environ["HYDRAG_FALLBACK_TIMEOUT_S"]
+    def test_fallback_timeout_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HYDRAG_FALLBACK_TIMEOUT_S", "2.5")
+        cfg = HydRAGConfig.from_env()
+        assert cfg.fallback_timeout_s == 2.5
 
-    def test_ollama_host_from_env(self) -> None:
-        os.environ["OLLAMA_HOST"] = "http://myhost:11434"
-        try:
-            cfg = HydRAGConfig.from_env()
-            assert cfg.ollama_host == "http://myhost:11434"
-        finally:
-            del os.environ["OLLAMA_HOST"]
+    def test_ollama_host_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OLLAMA_HOST", "http://myhost:11434")
+        cfg = HydRAGConfig.from_env()
+        assert cfg.ollama_host == "http://myhost:11434"
 
-    def test_defaults_without_env(self) -> None:
+    def test_defaults_without_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Clear any HYDRAG_ vars that might leak from environment
         for key in list(os.environ):
             if key.startswith("HYDRAG_") or key in ("CRAG_MODEL", "CRAG_TIMEOUT", "OLLAMA_HOST"):
-                os.environ.pop(key, None)
+                monkeypatch.delenv(key, raising=False)
         cfg = HydRAGConfig.from_env()
         assert cfg.profile == "prose"
-        assert cfg.crag_model == "qwen3.5-4B"
-        assert cfg.embedding_model == "qwen3-embedding-0.6b"
+        assert cfg.crag_model == "qwen3:4b"
+        assert cfg.embedding_model == "Alibaba-NLP/gte-Qwen2-7B-instruct"
         assert cfg.ollama_host == "http://localhost:11434"
 
 
@@ -99,16 +86,12 @@ class TestHydRAGConfigFastPath:
         assert cfg.enable_fast_path is True
         assert cfg.fast_path_bm25_threshold == 0.75
 
-    def test_fast_path_from_env(self) -> None:
-        os.environ["HYDRAG_ENABLE_FAST_PATH"] = "true"
-        os.environ["HYDRAG_FAST_PATH_BM25_THRESHOLD"] = "0.8"
-        try:
-            cfg = HydRAGConfig.from_env()
-            assert cfg.enable_fast_path is True
-            assert cfg.fast_path_bm25_threshold == 0.8
-        finally:
-            del os.environ["HYDRAG_ENABLE_FAST_PATH"]
-            del os.environ["HYDRAG_FAST_PATH_BM25_THRESHOLD"]
+    def test_fast_path_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HYDRAG_ENABLE_FAST_PATH", "true")
+        monkeypatch.setenv("HYDRAG_FAST_PATH_BM25_THRESHOLD", "0.8")
+        cfg = HydRAGConfig.from_env()
+        assert cfg.enable_fast_path is True
+        assert cfg.fast_path_bm25_threshold == 0.8
 
 
 class TestHydRAGConfigPerHead:

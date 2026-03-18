@@ -11,7 +11,7 @@ _MARKDOWN_HEADING_RE = re.compile(r"^#{1,6}\s+", re.MULTILINE)
 _MARKDOWN_BOLD_ITALIC_RE = re.compile(r"[*_]{1,3}([^*_]+)[*_]{1,3}")
 
 
-def _sanitize_web_content(
+def sanitize_web_content(
     raw: str,
     max_chars: int = 3000,
     allow_markdown: bool = False,

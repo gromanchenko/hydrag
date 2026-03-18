@@ -10,10 +10,22 @@ from .core import (
     semantic_fallback,
     web_fallback,
 )
+from .doc2query import (
+    AugmentationCache,
+    CacheEntry,
+    Doc2QueryConfig,
+    Doc2QueryGenerator,
+    compute_adaptive_n,
+    smart_truncate,
+)
 from .fusion import CRAGVerdict, RetrievalResult
-from .fusion import _rrf_fuse as rrf_fuse
+from .fusion import rrf_fuse
 from .protocols import LLMProvider, StreamingLLMProvider, VectorStoreAdapter
-from .sanitize import _sanitize_web_content as sanitize_web_content
+from .providers.factory import create_llm_provider
+from .providers.huggingface import HuggingFaceProvider
+from .providers.openai_compat import OpenAICompatProvider
+from .sanitize import sanitize_web_content
+from .sqlite_store import IndexedChunk, SQLiteFTSStore
 
 # Tune pipeline (optional — requires hydrag-core[tune] deps for training,
 # but data structures and classifier loader are always importable)
@@ -65,7 +77,21 @@ __all__ = [
     "HydRAG",
     # Default provider
     "OllamaProvider",
+    # Built-in providers (V2.3+ multi-provider)
+    "HuggingFaceProvider",
+    "OpenAICompatProvider",
+    "create_llm_provider",
     # Utilities
     "rrf_fuse",
     "sanitize_web_content",
+    # SQLite FTS5 (T-742/T-743)
+    "SQLiteFTSStore",
+    "IndexedChunk",
+    # Doc2Query V2 (T-740)
+    "Doc2QueryConfig",
+    "Doc2QueryGenerator",
+    "AugmentationCache",
+    "CacheEntry",
+    "compute_adaptive_n",
+    "smart_truncate",
 ] + _TUNE_EXPORTS

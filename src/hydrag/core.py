@@ -1,92 +1,21 @@
 """HydRAG core orchestrator — multi-headed retrieval with CRAG supervision."""
 
-import json
 import logging
 import os
 import re
 import time
-import urllib.error
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
 from .config import HydRAGConfig
-from .fusion import CRAGVerdict, RetrievalResult, _as_results, _rrf_fuse, _text_of
+from .fusion import CRAGVerdict, RetrievalResult, _as_results, _text_of, rrf_fuse
 from .protocols import LLMProvider, StreamingLLMProvider, VectorStoreAdapter
-from .sanitize import _sanitize_web_content
+from .providers.factory import create_llm_provider
+from .providers.ollama import OllamaProvider
+from .sanitize import sanitize_web_content
 
 logger = logging.getLogger("hydrag")
-
-
-# ── Default LLM provider (Ollama) ────────────────────────────────
-
-
-class OllamaProvider:
-    """Ollama /api/generate provider with 3-attempt retry."""
-
-    def __init__(self, host: str = "http://localhost:11434") -> None:
-        self._host = host
-
-    def generate(self, prompt: str, model: str = "", timeout: int = 30) -> str | None:
-        effective_model = model or "llama3.2:latest"
-        payload = json.dumps(
-            {"model": effective_model, "prompt": prompt, "stream": False}
-        ).encode()
-        headers = {"Content-Type": "application/json"}
-        for attempt in range(3):
-            try:
-                req = urllib.request.Request(
-                    f"{self._host}/api/generate",
-                    data=payload,
-                    headers=headers,
-                    method="POST",
-                )
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
-                    data = json.loads(resp.read().decode())
-                    return str(data.get("response", "")) or None
-            except (urllib.error.URLError, TimeoutError, OSError, ValueError):
-                if attempt < 2:
-                    time.sleep(0.5)
-        return None
-
-    def generate_stream(
-        self, prompt: str, model: str = "", timeout: int = 30,
-    ) -> str | None:
-        """Streaming generate — returns full response but reads line-by-line.
-
-        This enables early termination once the verdict token is detected
-        by the caller (via the streaming CRAG supervisor).
-        """
-        effective_model = model or "llama3.2:latest"
-        payload = json.dumps(
-            {"model": effective_model, "prompt": prompt, "stream": True}
-        ).encode()
-        headers = {"Content-Type": "application/json"}
-        for attempt in range(3):
-            try:
-                req = urllib.request.Request(
-                    f"{self._host}/api/generate",
-                    data=payload,
-                    headers=headers,
-                    method="POST",
-                )
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
-                    tokens: list[str] = []
-                    for line in resp:
-                        chunk = json.loads(line.decode())
-                        token = chunk.get("response", "")
-                        tokens.append(token)
-                        accumulated = "".join(tokens).strip().upper()
-                        if "SUFFICIENT" in accumulated or "INSUFFICIENT" in accumulated:
-                            return "".join(tokens)
-                        if chunk.get("done"):
-                            break
-                    return "".join(tokens)
-            except (urllib.error.URLError, TimeoutError, OSError, ValueError):
-                if attempt < 2:
-                    time.sleep(0.5)
-        return None
 
 
 # ── CRAG prompt ──────────────────────────────────────────────────
@@ -111,6 +40,11 @@ Verdict:"""
 
 # ── Symbol detection (code profile only) ─────────────────────────
 
+_RE_BACKTICK = re.compile(r"`([^`]+)`")
+_RE_CAMEL = re.compile(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b")
+_RE_SNAKE = re.compile(r"\b([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\b")
+_RE_DOTTED = re.compile(r"\b([a-zA-Z_]\w*(?:\.\w+)+)\b")
+
 
 def _extract_symbol_hints(query: str) -> list[str]:
     """Extract likely code symbol references from a natural-language query.
@@ -119,10 +53,10 @@ def _extract_symbol_hints(query: str) -> list[str]:
     Only used when ``profile="code"``.
     """
     hints: list[str] = []
-    hints.extend(re.findall(r"`([^`]+)`", query))
-    hints.extend(re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b", query))
-    hints.extend(re.findall(r"\b([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\b", query))
-    hints.extend(re.findall(r"\b([a-zA-Z_]\w*(?:\.\w+)+)\b", query))
+    hints.extend(_RE_BACKTICK.findall(query))
+    hints.extend(_RE_CAMEL.findall(query))
+    hints.extend(_RE_SNAKE.findall(query))
+    hints.extend(_RE_DOTTED.findall(query))
     return list(dict.fromkeys(hints))  # dedupe preserving order
 
 
@@ -293,7 +227,7 @@ def semantic_fallback(
             logger.warning("semantic_fallback: graph branch timed out / failed")
             graph_future.cancel()
 
-    return _rrf_fuse(
+    return rrf_fuse(
         [
             (primary_hits, 0.5),
             (crag_hits, 1.2),
@@ -348,12 +282,12 @@ def web_fallback(
             title = item.get("title", "")
             url = item.get("url", "")
             md = item.get("markdown", "") or item.get("content", "") or ""
-            sanitized = _sanitize_web_content(
+            sanitized = sanitize_web_content(
                 md,
                 max_chars=cfg.web_chunk_limit,
                 allow_markdown=cfg.allow_markdown_in_web_fallback,
             )
-            chunk = f"[Web: {_sanitize_web_content(title, max_chars=200)}]({url})\n{sanitized}"
+            chunk = f"[Web: {sanitize_web_content(title, max_chars=200)}]({url})\n{sanitized}"
             chunks.append(chunk)
         return _as_results(chunks, head_origin="web", trust_level="web")
 
@@ -412,7 +346,7 @@ def hydrag_search(
     cfg = config or HydRAGConfig()
     if heads is not None and disable_heads is not None:
         raise ValueError("Cannot specify both 'heads' and 'disable_heads' — use one or the other.")
-    llm_provider = llm or OllamaProvider(host=cfg.ollama_host)
+    llm_provider = llm or create_llm_provider(cfg)
     weights = cfg.rrf_head_weights
     web_enabled = enable_web_fallback if enable_web_fallback is not None else cfg.enable_web_fallback
 
@@ -476,7 +410,7 @@ def hydrag_search(
             kw_hits = adapter.keyword_search(
                 sym_query, n_results=max(n_results, cfg.min_candidate_pool)
             )
-            primary_rr = _rrf_fuse(
+            primary_rr = rrf_fuse(
                 [(sem_hits, 1.5), (kw_hits, 1.0)],
                 k=cfg.rrf_k,
                 n_results=max(n_results, cfg.min_candidate_pool),
@@ -559,7 +493,7 @@ def hydrag_search(
                 web_future.cancel()
 
     # ── Final RRF fusion across all heads ──
-    return _rrf_fuse(
+    return rrf_fuse(
         [
             (primary_hits, weights.get(head_1_key, 0.6)),
             (fallback_hits, weights.get("head_3a", 1.3)),
@@ -617,3 +551,11 @@ class HydRAG:
             heads=heads,
             disable_heads=disable_heads,
         )
+
+    def __enter__(self) -> "HydRAG":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        close = getattr(self._adapter, "close", None)
+        if callable(close):
+            close()

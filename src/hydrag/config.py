@@ -1,7 +1,10 @@
 """HydRAG configuration with domain-agnostic defaults."""
 
+import logging
 import os
 from dataclasses import dataclass, field
+
+logger = logging.getLogger("hydrag.config")
 
 HYDRAG_SPEC_VERSION = "2.3"
 
@@ -25,8 +28,8 @@ class HydRAGConfig:
     """
 
     profile: str = "prose"
-    embedding_model: str = "qwen3-embedding-0.6b"
-    crag_model: str = "qwen3.5-4B"
+    embedding_model: str = "Alibaba-NLP/gte-Qwen2-7B-instruct"
+    crag_model: str = "qwen3:4b"
     crag_timeout: int = 30
     ollama_host: str = "http://localhost:11434"
     enable_web_fallback: bool = False  # Also gated by enable_head_3b_web per-head switch
@@ -55,6 +58,15 @@ class HydRAGConfig:
     enable_head_3a_semantic: bool = True  # Semantic fallback
     enable_head_3b_web: bool = False      # Web fallback (also gated by enable_web_fallback)
     fallback_timeout_s: float = 30.0
+    # V2.3+: Multi-provider LLM support (RFC V3)
+    llm_provider: str = "ollama"
+    hf_model_id: str = ""
+    hf_api_base: str = ""
+    hf_timeout: int = 30
+    openai_compat_api_base: str = ""
+    openai_compat_model: str = ""
+    openai_compat_timeout: int = 30
+    openai_compat_endpoint: str = "/v1/chat/completions"
     rrf_head_weights: dict[str, float] = field(
         default_factory=lambda: {
             "head_1a": 1.5,
@@ -63,6 +75,17 @@ class HydRAGConfig:
             "head_3b": 0.8,
         }
     )
+
+    def __post_init__(self) -> None:
+        """Validate config fields."""
+        if self.profile not in ("prose", "code"):
+            raise ValueError(f"profile must be 'prose' or 'code', got {self.profile!r}")
+        if self.crag_mode not in ("auto", "llm", "classifier"):
+            raise ValueError(f"crag_mode must be 'auto', 'llm', or 'classifier', got {self.crag_mode!r}")
+        if not (0 < self.fast_path_bm25_threshold <= 1.0):
+            raise ValueError(f"fast_path_bm25_threshold must be in (0, 1.0], got {self.fast_path_bm25_threshold}")
+        if self.rrf_k < 1:
+            raise ValueError(f"rrf_k must be >= 1, got {self.rrf_k}")
 
     @classmethod
     def from_env(cls) -> "HydRAGConfig":
@@ -125,6 +148,14 @@ class HydRAGConfig:
             enable_head_2_crag=os.environ.get("HYDRAG_ENABLE_HEAD_2_CRAG", "true").lower() in ("1", "true"),
             enable_head_3a_semantic=os.environ.get("HYDRAG_ENABLE_HEAD_3A_SEMANTIC", "true").lower() in ("1", "true"),
             enable_head_3b_web=os.environ.get("HYDRAG_ENABLE_HEAD_3B_WEB", "").lower() in ("1", "true"),
+            llm_provider=os.environ.get("HYDRAG_LLM_PROVIDER", cls.llm_provider),
+            hf_model_id=os.environ.get("HYDRAG_HF_MODEL_ID", cls.hf_model_id),
+            hf_api_base=os.environ.get("HYDRAG_HF_API_BASE", cls.hf_api_base),
+            hf_timeout=int(os.environ.get("HYDRAG_HF_TIMEOUT", str(cls.hf_timeout))),
+            openai_compat_api_base=os.environ.get("HYDRAG_OPENAI_COMPAT_API_BASE", cls.openai_compat_api_base),
+            openai_compat_model=os.environ.get("HYDRAG_OPENAI_COMPAT_MODEL", cls.openai_compat_model),
+            openai_compat_timeout=int(os.environ.get("HYDRAG_OPENAI_COMPAT_TIMEOUT", str(cls.openai_compat_timeout))),
+            openai_compat_endpoint=os.environ.get("HYDRAG_OPENAI_COMPAT_ENDPOINT", cls.openai_compat_endpoint),
         )
         # Handle JSON dictionary for RRF weights
         weights_env = os.environ.get("HYDRAG_RRF_HEAD_WEIGHTS")
@@ -133,6 +164,9 @@ class HydRAGConfig:
             try:
                 cfg.rrf_head_weights = json.loads(weights_env)
             except (json.JSONDecodeError, TypeError):
-                pass
+                logger.warning(
+                    "Malformed HYDRAG_RRF_HEAD_WEIGHTS=%r — using defaults",
+                    weights_env,
+                )
         return cfg
 

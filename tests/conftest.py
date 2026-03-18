@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 
-from hydrag import HydRAGConfig, LLMProvider, VectorStoreAdapter
+from hydrag import HydRAGConfig, LLMProvider, StreamingLLMProvider, VectorStoreAdapter
 
 
 @dataclass
@@ -78,6 +78,7 @@ class MockLLM:
 assert isinstance(MockAdapter(), VectorStoreAdapter)
 assert isinstance(MinimalAdapter(), VectorStoreAdapter)
 assert isinstance(MockLLM(), LLMProvider)
+assert isinstance(MockLLM(), StreamingLLMProvider)
 
 
 def make_config(**overrides: object) -> HydRAGConfig:

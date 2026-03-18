@@ -42,8 +42,8 @@ from hydrag import HydRAGConfig
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `profile` | `str` | `"prose"` | Domain profile: `"prose"` (default, domain-agnostic) or `"code"` (symbol-aware) |
-| `embedding_model` | `str` | `"qwen3-embedding-0.6b"` | Embedding model name for vector operations |
-| `crag_model` | `str` | `"qwen3.5-4B"` | Ollama model for CRAG supervisor |
+| `embedding_model` | `str` | `"Alibaba-NLP/gte-Qwen2-7B-instruct"` | Embedding model name for vector operations |
+| `crag_model` | `str` | `"qwen3:4b"` | Ollama model for CRAG supervisor |
 | `crag_timeout` | `int` | `30` | CRAG inference timeout (seconds) |
 | `ollama_host` | `str` | `"http://localhost:11434"` | Ollama server URL |
 | `enable_web_fallback` | `bool` | `False` | Enable Head 3b web fallback via Firecrawl |
@@ -271,7 +271,7 @@ class CRAGVerdict:
 from hydrag import OllamaProvider
 
 llm = OllamaProvider(host="http://localhost:11434")
-response = llm.generate("Hello", model="qwen3.5-4B", timeout=30)
+response = llm.generate("Hello", model="qwen3:4b", timeout=30)
 ```
 
 3-attempt retry with 0.5s backoff. Returns `None` on total failure.

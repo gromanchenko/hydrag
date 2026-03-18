@@ -31,6 +31,7 @@ import hashlib
 import json
 import logging
 import random
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -369,6 +370,8 @@ def train_classifier(
         return_tensors="pt",
     )
 
+    import torch as _torch
+
     class _CRAGDataset:
         def __init__(self, enc: Any, lab: list[int]) -> None:
             self._enc = enc
@@ -378,9 +381,8 @@ def train_classifier(
             return len(self._lab)
 
         def __getitem__(self, idx: int) -> dict[str, Any]:
-            import torch
             item = {k: v[idx] for k, v in self._enc.items()}
-            item["labels"] = torch.tensor(self._lab[idx])
+            item["labels"] = _torch.tensor(self._lab[idx])
             return item
 
     train_dataset = _CRAGDataset(encodings, labels)
@@ -631,8 +633,8 @@ class CRAGClassifier:
     def predict(self, query: str, context: str) -> CRAGVerdict:
         """Run classifier inference and return a CRAGVerdict."""
         self._ensure_loaded()
-        assert self._tokenizer is not None
-        assert self._session is not None
+        if self._tokenizer is None or self._session is None:
+            raise RuntimeError("Classifier not loaded — call _ensure_loaded() first")
 
         start = time.monotonic()
         text = f"{query} [SEP] {context}"
@@ -664,16 +666,21 @@ class CRAGClassifier:
         )
 
 
-# Cached singleton — loaded once per process
+# Cached singleton — loaded once per process (thread-safe)
 _CLASSIFIER_CACHE: dict[str, CRAGClassifier] = {}
+_CLASSIFIER_LOCK = threading.Lock()
 
 
 def get_classifier(model_dir: str | Path) -> CRAGClassifier:
     """Get or create a cached CRAGClassifier instance."""
-    key = str(Path(model_dir).resolve())
-    if key not in _CLASSIFIER_CACHE:
-        _CLASSIFIER_CACHE[key] = CRAGClassifier(model_dir)
-    return _CLASSIFIER_CACHE[key]
+    resolved = Path(model_dir).resolve()
+    if not resolved.is_dir():
+        raise FileNotFoundError(f"Classifier model directory not found: {resolved}")
+    key = str(resolved)
+    with _CLASSIFIER_LOCK:
+        if key not in _CLASSIFIER_CACHE:
+            _CLASSIFIER_CACHE[key] = CRAGClassifier(model_dir)
+        return _CLASSIFIER_CACHE[key]
 
 
 # ── Utility ──────────────────────────────────────────────────────

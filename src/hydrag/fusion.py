@@ -57,7 +57,7 @@ def _as_results(
     return out
 
 
-def _rrf_fuse(
+def rrf_fuse(
     sources: list[tuple[list[Any], float]],
     *,
     k: int = 60,

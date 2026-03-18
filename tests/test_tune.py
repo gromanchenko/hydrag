@@ -75,8 +75,17 @@ class TestCRAGClassifier:
     def test_get_classifier_returns_instance(self, tmp_path: Path) -> None:
         """get_classifier should return a CRAGClassifier (lazy-loaded)."""
         from hydrag.tune import CRAGClassifier, get_classifier
-        classifier = get_classifier(str(tmp_path / "nonexistent"))
+        model_dir = tmp_path / "model"
+        model_dir.mkdir()
+        classifier = get_classifier(str(model_dir))
         assert isinstance(classifier, CRAGClassifier)
+
+    def test_get_classifier_missing_dir_raises(self, tmp_path: Path) -> None:
+        """get_classifier should raise FileNotFoundError for missing directory."""
+        from hydrag.tune import get_classifier
+        import pytest
+        with pytest.raises(FileNotFoundError, match="Classifier model directory not found"):
+            get_classifier(str(tmp_path / "nonexistent"))
 
 
 class TestGenerateTrainingDataFromLogs:

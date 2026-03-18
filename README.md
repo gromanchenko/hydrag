@@ -19,7 +19,7 @@ supervisor to judge context sufficiency before triggering fallback strategies.
 - **CRAG supervisor** — LLM-graded context sufficiency with streaming verdict parsing and confidence-gated fast-path skip
 - **CRAG classifier** — Optional distilled DistilBERT binary classifier (<15 ms inference) replaces LLM-based CRAG via teacher-student training pipeline
 - **Pluggable adapters** — Implement the `VectorStoreAdapter` protocol to connect any vector store
-- **Pluggable LLM** — Implement `LLMProvider` protocol or use the built-in `OllamaProvider`
+- **Multi-provider LLM support** — Select built-in `ollama`, `huggingface`, or `openai_compat` via config, or inject any custom `LLMProvider`
 - **Zero required dependencies** — stdlib-only core; optional extras for ChromaDB, Firecrawl, fine-tuning, and dev tools
 - **Fully typed** — PEP 561 compatible with `py.typed` marker; strict mypy passes
 
@@ -80,6 +80,39 @@ class MyLLM:
 engine = HydRAG(adapter, llm=MyLLM())
 ```
 
+### Built-In LLM Providers
+
+HydRAG can construct the LLM provider from config without custom wiring.
+
+```python
+from hydrag import HydRAG, HydRAGConfig
+
+# Default: Ollama
+cfg = HydRAGConfig(llm_provider="ollama", ollama_host="http://localhost:11434")
+engine = HydRAG(adapter, config=cfg)
+
+# Hugging Face TGI-compatible endpoint
+cfg = HydRAGConfig(
+    llm_provider="huggingface",
+    hf_api_base="http://localhost:8080",
+    hf_model_id="meta-llama/Llama-3.1-8B-Instruct",
+)
+engine = HydRAG(adapter, config=cfg)
+
+# OpenAI-compatible endpoint (vLLM, LM Studio, OpenRouter-compatible gateway, etc.)
+cfg = HydRAGConfig(
+    llm_provider="openai_compat",
+    openai_compat_api_base="http://localhost:8000",
+    openai_compat_model="Qwen/Qwen2.5-7B-Instruct",
+)
+engine = HydRAG(adapter, config=cfg)
+```
+
+Tokens are read from environment by default:
+
+- `HYDRAG_HF_API_TOKEN` for `llm_provider="huggingface"`
+- `HYDRAG_OPENAI_COMPAT_API_KEY` for `llm_provider="openai_compat"`
+
 ### Streaming CRAG Provider
 
 For lower-latency CRAG verdict parsing, implement `StreamingLLMProvider`:
@@ -139,10 +172,18 @@ All settings can be set via environment variables (`HYDRAG_` prefix) or passed d
 | Setting | Env Var | Default | Description |
 |---------|---------|---------|-------------|
 | `profile` | `HYDRAG_PROFILE` | `"prose"` | `"prose"` or `"code"` |
-| `embedding_model` | `HYDRAG_EMBEDDING_MODEL` | `"qwen3-embedding-0.6b"` | Embedding model name |
-| `crag_model` | `CRAG_MODEL` | `"qwen3.5-4B"` | Model for CRAG supervisor |
+| `embedding_model` | `HYDRAG_EMBEDDING_MODEL` | `"Alibaba-NLP/gte-Qwen2-7B-instruct"` | Embedding model name |
+| `crag_model` | `CRAG_MODEL` | `"qwen3:4b"` | Model for CRAG supervisor |
 | `crag_timeout` | `CRAG_TIMEOUT` | `30` | Timeout (seconds) for CRAG calls |
 | `ollama_host` | `OLLAMA_HOST` | `"http://localhost:11434"` | Ollama API endpoint |
+| `llm_provider` | `HYDRAG_LLM_PROVIDER` | `"ollama"` | LLM backend selector: `ollama`, `huggingface`, `openai_compat` |
+| `hf_model_id` | `HYDRAG_HF_MODEL_ID` | `""` | Optional model id for Hugging Face provider |
+| `hf_api_base` | `HYDRAG_HF_API_BASE` | `""` | Hugging Face/TGI base URL (required when `llm_provider="huggingface"`) |
+| `hf_timeout` | `HYDRAG_HF_TIMEOUT` | `30` | Timeout (seconds) for Hugging Face provider calls |
+| `openai_compat_api_base` | `HYDRAG_OPENAI_COMPAT_API_BASE` | `""` | OpenAI-compatible API base URL (required when `llm_provider="openai_compat"`) |
+| `openai_compat_model` | `HYDRAG_OPENAI_COMPAT_MODEL` | `""` | Model name for OpenAI-compatible provider (required when `llm_provider="openai_compat"`) |
+| `openai_compat_timeout` | `HYDRAG_OPENAI_COMPAT_TIMEOUT` | `30` | Timeout (seconds) for OpenAI-compatible provider calls |
+| `openai_compat_endpoint` | `HYDRAG_OPENAI_COMPAT_ENDPOINT` | `"/v1/chat/completions"` | Override OpenAI-compatible chat completions endpoint path |
 | `enable_web_fallback` | `HYDRAG_ENABLE_WEB_FALLBACK` | `false` | Enable Firecrawl web fallback |
 | `allow_web_on_empty_primary` | `HYDRAG_ALLOW_WEB_ON_EMPTY` | `false` | Allow web fallback when Head 1 returns empty |
 | `allow_markdown_in_web_fallback` | `HYDRAG_ALLOW_MARKDOWN_WEB` | `false` | Preserve markdown in web fallback content |
