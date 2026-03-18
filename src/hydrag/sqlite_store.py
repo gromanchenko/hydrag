@@ -213,15 +213,26 @@ class SQLiteFTSStore:
 
     @staticmethod
     def _escape_fts_query(query: str) -> str:
-        """Convert a natural language query into safe FTS5 OR-joined tokens."""
-        tokens = query.split()
-        # Strip FTS5 operators and special chars
-        clean = []
+        """Convert a natural language query into safe FTS5 OR-joined tokens.
+
+        Rules:
+        - Keep alphanumeric characters and underscores.
+        - Strip all punctuation (including periods) — FTS5 query syntax treats
+          a trailing '.' as a syntax error even though the tokenizer handles it
+          transparently at index time.
+        - Hyphens split compound words into individual tokens so each part can
+          match independently against the FTS5 index.
+        - Drop FTS5 reserved operators to avoid ambiguous query syntax.
+        """
         fts_operators = {"AND", "OR", "NOT", "NEAR"}
-        for t in tokens:
-            word = "".join(c for c in t if c.isalnum() or c in "_.")
-            if word and word.upper() not in fts_operators:
-                clean.append(word)
+        clean: list[str] = []
+        for raw_token in query.split():
+            # Split on hyphens so "0-dimensional" → ["0", "dimensional"]
+            sub_tokens = raw_token.split("-")
+            for t in sub_tokens:
+                word = "".join(c for c in t if c.isalnum() or c == "_")
+                if word and word.upper() not in fts_operators:
+                    clean.append(word)
         if not clean:
             return ""
         return " OR ".join(clean)

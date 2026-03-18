@@ -170,6 +170,35 @@ class TestSQLiteFTSStore:
             store.hybrid_search("test*query")
             store.hybrid_search("")
 
+    def test_trailing_period_no_syntax_error(self) -> None:
+        """Queries ending with '.' must not raise OperationalError (regression T-FTS5-period)."""
+        chunk = IndexedChunk("c1", "test", "", "biomaterials show inductive properties")
+        with SQLiteFTSStore() as store:
+            store.index_documents([chunk])
+            # The period in "properties." previously caused FTS5 syntax error
+            results = store.keyword_search("biomaterials show inductive properties.")
+            assert results  # must return the document
+
+    def test_hyphenated_query_tokenization(self) -> None:
+        """Hyphens split tokens so both parts can match the index."""
+        chunk = IndexedChunk("c1", "test", "", "0-dimensional biomaterials")
+        with SQLiteFTSStore() as store:
+            store.index_documents([chunk])
+            results = store.keyword_search("0-dimensional biomaterials.")
+            assert results  # must find the document via 'dimensional' or '0'
+
+    def test_escape_fts_strips_period(self) -> None:
+        """_escape_fts_query must not emit tokens ending in '.'."""
+        escaped = SQLiteFTSStore._escape_fts_query("properties.")
+        assert "." not in escaped, f"Period not stripped: {escaped!r}"
+
+    def test_escape_fts_splits_hyphen(self) -> None:
+        """_escape_fts_query must split on hyphens."""
+        escaped = SQLiteFTSStore._escape_fts_query("0-dimensional")
+        parts = escaped.split(" OR ")
+        assert "0" in parts
+        assert "dimensional" in parts
+
 
 # ── T-742: Utility functions ──────────────────────────────────────────
 
