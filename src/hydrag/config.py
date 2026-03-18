@@ -84,6 +84,8 @@ class HydRAGConfig:
             raise ValueError(f"crag_mode must be 'auto', 'llm', or 'classifier', got {self.crag_mode!r}")
         if not (0 < self.fast_path_bm25_threshold <= 1.0):
             raise ValueError(f"fast_path_bm25_threshold must be in (0, 1.0], got {self.fast_path_bm25_threshold}")
+        if not (0 <= self.fast_path_confidence_threshold <= 1.0):
+            raise ValueError(f"fast_path_confidence_threshold must be in [0, 1.0], got {self.fast_path_confidence_threshold}")
         if self.rrf_k < 1:
             raise ValueError(f"rrf_k must be >= 1, got {self.rrf_k}")
 

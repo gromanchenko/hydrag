@@ -71,8 +71,12 @@ class SQLiteFTSStore:
         self._db_path = str(db_path)
         self._conn = sqlite3.connect(self._db_path)
         self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._init_schema()
+        try:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._init_schema()
+        except Exception:
+            self._conn.close()
+            raise
 
     def _init_schema(self) -> None:
         self._conn.executescript("""
@@ -215,7 +219,7 @@ class SQLiteFTSStore:
         clean = []
         fts_operators = {"AND", "OR", "NOT", "NEAR"}
         for t in tokens:
-            word = "".join(c for c in t if c.isalnum() or c == "_")
+            word = "".join(c for c in t if c.isalnum() or c in "_.")
             if word and word.upper() not in fts_operators:
                 clean.append(word)
         if not clean:

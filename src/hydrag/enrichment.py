@@ -81,6 +81,7 @@ class OllamaKeywordExtractor:
 
     def _call_ollama(self, prompt: str) -> str:
         """Call Ollama /api/generate and return the response text."""
+        from hydrag.providers._retry import retry_request
         url = f"{self.host}/api/generate"
         payload = json.dumps({
             "model": self.model,
@@ -89,15 +90,18 @@ class OllamaKeywordExtractor:
             "options": {"temperature": 0.3, "num_predict": 512},
         }).encode("utf-8")
 
-        req = urllib.request.Request(
-            url,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        def _parse(data: dict) -> str:
             return data.get("response", "")
+
+        result = retry_request(
+            url=url,
+            payload=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=self.timeout,
+            provider_name="OllamaEnhancement",
+            parse_response=_parse,
+        )
+        return result or ""
 
     @staticmethod
     def _parse_response(raw: str) -> dict[str, Any]:

@@ -6,6 +6,15 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [1.2.8] — 2026-03-18
+
+### Fixed
+- **Enrichment retry** (M3): `OllamaKeywordExtractor._call_ollama()` now uses shared `retry_request()` with exponential backoff; fixed type mismatch in parse callback (was receiving `dict`, not `bytes`)
+- **Config validation** (M1): `fast_path_confidence_threshold` now validated to `[0, 1.0]` in `__post_init__`
+- **SQLite init leak** (M2): `__init__` wraps PRAGMA + schema init in try/except, closes connection on failure
+- **FTS5 escape** (L1): dots (`.`) preserved in query tokens for versioned identifiers (`v2.1`, `3.12`); hyphens stripped (FTS5 NOT operator)
+- **CRAG classifier thread safety** (H1): `_ensure_loaded()` uses `threading.Lock` with double-check locking to prevent TOCTOU race on ONNX session init
+
 ## [1.2.4] — 2026-03-18
 
 ### Added
@@ -19,7 +28,7 @@ Versioning: [SemVer](https://semver.org/).
 - **Conformance test harness**: Parametrized across all providers with mock HTTP
 - **Secret passthrough**: Factory `api_tokens` parameter for library-first usage without env vars
 - 6 new public exports: `Doc2QueryConfig`, `Doc2QueryGenerator`, `AugmentationCache`, `CacheEntry`, `compute_adaptive_n`, `smart_truncate`
-- 38 new Doc2Query tests (255 total)
+- 38 new Doc2Query tests (256 total)
 
 ### Changed
 - `core.py` uses factory instead of hardcoded `OllamaProvider` for default LLM bootstrap
@@ -102,7 +111,7 @@ Versioning: [SemVer](https://semver.org/).
 - `HydRAGConfig.crag_classifier_path` field for ONNX model path
 - `rrf_head_weights` — configurable per-head weight map for RRF fusion
 - PEP 561 `py.typed` marker for downstream type-checking support
-- Comprehensive PyPI packaging: badges, sdist includes, `Typing :: Typed` classifier
+- Comprehensive packaging: badges, sdist includes, `Typing :: Typed` classifier
 
 ### Changed
 - Default `crag_model` → `"qwen3:4b"` (was `"devstral-small-2:latest"`)

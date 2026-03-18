@@ -608,27 +608,33 @@ class CRAGClassifier:
         self._model_dir = Path(model_dir)
         self._session = None
         self._tokenizer = None
+        self._lock = threading.Lock()
         self._max_length = 512
 
     def _ensure_loaded(self) -> None:
         if self._session is not None:
             return
 
-        try:
-            import onnxruntime as ort  # type: ignore[import-untyped]
-            from transformers import AutoTokenizer
-        except ImportError as exc:
-            raise ImportError(
-                "Classifier inference requires: pip install hydrag-core[tune]"
-            ) from exc
+        with self._lock:
+            # Double-check locking pattern
+            if self._session is not None:
+                return
 
-        onnx_path = self._model_dir / "model.onnx"
-        if not onnx_path.exists():
-            raise FileNotFoundError(f"No ONNX model at {onnx_path}")
+            try:
+                import onnxruntime as ort  # type: ignore[import-untyped]
+                from transformers import AutoTokenizer
+            except ImportError as exc:
+                raise ImportError(
+                    "Classifier inference requires: pip install hydrag-core[tune]"
+                ) from exc
 
-        self._tokenizer = AutoTokenizer.from_pretrained(str(self._model_dir))  # type: ignore[no-untyped-call]
-        self._session = ort.InferenceSession(str(onnx_path))
-        logger.info("Loaded CRAG classifier from %s", onnx_path)
+            onnx_path = self._model_dir / "model.onnx"
+            if not onnx_path.exists():
+                raise FileNotFoundError(f"No ONNX model at {onnx_path}")
+
+            self._tokenizer = AutoTokenizer.from_pretrained(str(self._model_dir))  # type: ignore[no-untyped-call]
+            self._session = ort.InferenceSession(str(onnx_path))
+            logger.info("Loaded CRAG classifier from %s", onnx_path)
 
     def predict(self, query: str, context: str) -> CRAGVerdict:
         """Run classifier inference and return a CRAGVerdict."""
