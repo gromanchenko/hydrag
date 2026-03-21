@@ -6,6 +6,20 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [1.2.34] — 2026-03-21
+
+### Fixed
+- **FTS5 query escape** (L1 follow-up): Periods now stripped from FTS5 query tokens (previously preserved; caused syntax errors on trailing dots). Hyphens split compound words into sub-tokens for independent matching (e.g. `"0-dimensional"` → `["0", "dimensional"]`).
+
+### Changed
+- **License copyright**: Updated to `G.Romanchenko <goshka@gmail.com>`.
+- **Version reconciliation**: Continued from GitHub baseline 1.2.33 and set release to 1.2.34 to avoid version rollback while preserving semantic ordering for PyPI.
+
+## [1.2.9–1.2.33] — 2026-03-18 to 2026-03-20
+
+### Note
+Auto-bumped patch versions with **no functional changes** beyond 1.2.8. Published to PyPI by the pre-commit auto-bump hook (`scripts/hydrag_bump_patch.py`). Hook disabled in 1.2.34.
+
 ## [1.2.8] — 2026-03-18
 
 ### Fixed
