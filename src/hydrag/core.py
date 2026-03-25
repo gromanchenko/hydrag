@@ -12,7 +12,6 @@ from .config import HydRAGConfig
 from .fusion import CRAGVerdict, RetrievalResult, _as_results, _text_of, rrf_fuse
 from .protocols import LLMProvider, StreamingLLMProvider, VectorStoreAdapter
 from .providers.factory import create_llm_provider
-from .providers.ollama import OllamaProvider
 from .sanitize import sanitize_web_content
 
 logger = logging.getLogger("hydrag")

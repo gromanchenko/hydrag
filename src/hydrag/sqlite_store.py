@@ -9,11 +9,10 @@ T-743: LLM enrichment integration (summary + keyword extraction)
 """
 
 import hashlib
-import json
 import logging
 import math
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 

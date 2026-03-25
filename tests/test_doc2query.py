@@ -7,17 +7,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from hydrag.doc2query import (
     AugmentationCache,
-    CacheEntry,
     Doc2QueryConfig,
     Doc2QueryGenerator,
     compute_adaptive_n,
     smart_truncate,
 )
-
 
 # ── compute_adaptive_n ───────────────────────────────────────────────────────
 

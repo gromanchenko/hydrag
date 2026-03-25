@@ -82,8 +82,9 @@ class TestCRAGClassifier:
 
     def test_get_classifier_missing_dir_raises(self, tmp_path: Path) -> None:
         """get_classifier should raise FileNotFoundError for missing directory."""
-        from hydrag.tune import get_classifier
         import pytest
+
+        from hydrag.tune import get_classifier
         with pytest.raises(FileNotFoundError, match="Classifier model directory not found"):
             get_classifier(str(tmp_path / "nonexistent"))
 

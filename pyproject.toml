@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hydrag-core"
-version = "1.2.39"
+version = "1.2.40"
 description = "HydRAG — Multi-Headed Retrieval-Augmented Generation with CRAG supervision"
 readme = "README.md"
 license = "Apache-2.0"
@@ -46,11 +46,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/gromanchenko/mot/tree/main/packages/hydrag-core"
-Documentation = "https://github.com/gromanchenko/mot/tree/main/packages/hydrag-core#readme"
-Repository = "https://github.com/gromanchenko/mot"
-Changelog = "https://github.com/gromanchenko/mot/blob/main/packages/hydrag-core/CHANGELOG.md"
-Issues = "https://github.com/gromanchenko/mot/issues"
+Homepage = "https://github.com/gromanchenko/hydrag"
+Documentation = "https://github.com/gromanchenko/hydrag#readme"
+Repository = "https://github.com/gromanchenko/hydrag"
+Changelog = "https://github.com/gromanchenko/hydrag/blob/main/CHANGELOG.md"
+Issues = "https://github.com/gromanchenko/hydrag/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hydrag"]

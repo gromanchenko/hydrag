@@ -1,7 +1,6 @@
 """Tests for SQLiteFTSStore (T-742) and enrichment (T-743)."""
 
 import json
-import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -15,7 +14,6 @@ from hydrag.sqlite_store import (
     _adaptive_keyword_count,
     _content_hash,
 )
-
 
 # ── Helpers ────────────────────────────────────────────────────────────
 

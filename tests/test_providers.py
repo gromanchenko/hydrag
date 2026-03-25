@@ -16,10 +16,12 @@ from unittest.mock import patch
 
 import pytest
 
+# Re-use conftest fixtures
+from conftest import MockAdapter, MockLLM, make_config
+
 from hydrag import (
-    CRAGVerdict,
-    HydRAGConfig,
     HydRAG,
+    HydRAGConfig,
     LLMProvider,
     OllamaProvider,
     StreamingLLMProvider,
@@ -29,10 +31,6 @@ from hydrag import (
 )
 from hydrag.providers.huggingface import HuggingFaceProvider
 from hydrag.providers.openai_compat import OpenAICompatProvider
-
-# Re-use conftest fixtures
-from conftest import MockAdapter, MockLLM, make_config
-
 
 # ── Mock HTTP server for provider conformance ─────────────────────
 
@@ -162,7 +160,9 @@ class TestConformanceHarness:
             provider.generate("test", model="m", timeout=5)
         assert exc_info.value.code == 403
 
-    def test_generate_returns_none_on_server_error(self, provider_name: str, mock_server: tuple[str, HTTPServer]) -> None:
+    def test_generate_returns_none_on_server_error(
+        self, provider_name: str, mock_server: tuple[str, HTTPServer]
+    ) -> None:
         """§12.1 #2 variant: HTTP 500 → None (transient)."""
         base, _ = mock_server
         _set_mock({"error": "internal"}, code=500)
@@ -394,7 +394,11 @@ class TestSecretHandling:
 class TestErrorCategoryLogging:
     """§12.2 #7: Error category logging with extra dict keys."""
 
-    def test_auth_error_logged_with_category(self, mock_server: tuple[str, HTTPServer], caplog: pytest.LogCaptureFixture) -> None:
+    def test_auth_error_logged_with_category(
+        self,
+        mock_server: tuple[str, HTTPServer],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
         base, _ = mock_server
         _set_mock({"error": "unauthorized"}, code=401)
         provider = OllamaProvider(host=base)
@@ -419,7 +423,11 @@ class TestErrorCategoryLogging:
 class TestCragModelIgnored:
     """§12.2 #8: crag_model ignored → INFO log emitted (AC-11)."""
 
-    def test_hf_logs_crag_model_ignored(self, mock_server: tuple[str, HTTPServer], caplog: pytest.LogCaptureFixture) -> None:
+    def test_hf_logs_crag_model_ignored(
+        self,
+        mock_server: tuple[str, HTTPServer],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
         base, _ = mock_server
         _set_mock([{"generated_text": "SUFFICIENT"}])
         provider = HuggingFaceProvider(api_base=base, model_id="hf-default")

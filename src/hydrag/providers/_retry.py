@@ -55,7 +55,11 @@ def retry_request(
                             logging.WARNING,
                             "%s malformed response",
                             provider_name,
-                            extra={"provider": provider_name, "category": "malformed_response", "detail": "parse returned None"},
+                            extra={
+                                "provider": provider_name,
+                                "category": "malformed_response",
+                                "detail": "parse returned None",
+                            },
                         )
                         if attempt < max_attempts - 1:
                             time.sleep(0.5)

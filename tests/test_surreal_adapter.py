@@ -8,15 +8,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
-import threading
-from dataclasses import dataclass
 from typing import Any
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from hydrag.sqlite_store import IndexedChunk
-
 
 # ── Mock SDK ──────────────────────────────────────────────────────────
 
@@ -124,13 +121,11 @@ def _connect_adapter(adapter: Any, mock_surreal: MockSurreal | None = None) -> M
 class TestProtocolConformance:
     def test_implements_vector_store_adapter(self) -> None:
         from hydrag.protocols import VectorStoreAdapter
-        from hydrag.surreal_adapter import SurrealDBAdapter
 
         adapter = _make_adapter()
         assert isinstance(adapter, VectorStoreAdapter)
 
     def test_has_required_methods(self) -> None:
-        from hydrag.surreal_adapter import SurrealDBAdapter
 
         adapter = _make_adapter()
         for method in ("semantic_search", "keyword_search", "hybrid_search"):
@@ -226,7 +221,6 @@ class TestConnectionLifecycle:
     def test_context_manager(self) -> None:
         adapter = _make_adapter(auto_schema=False)
         # Patch _connect to inject mock
-        original_connect = adapter._connect
 
         def patched_connect() -> None:
             _connect_adapter(adapter)
@@ -374,8 +368,6 @@ class TestSemanticSearch:
 
 class TestHybridSearch:
     def test_fuses_results(self) -> None:
-        call_count = {"n": 0}
-
         def embed(text: str) -> list[float]:
             return [0.1] * 384
 
@@ -545,7 +537,7 @@ class TestIndexEdges:
 
     def test_invalid_edge_type_raises(self) -> None:
         adapter = _make_adapter()
-        mock = _connect_adapter(adapter)
+        _connect_adapter(adapter)
         with pytest.raises(ValueError, match="Unknown edge type"):
             adapter.index_edges([("a", "invalid_type", "b")])
 
@@ -633,7 +625,7 @@ class TestHealthCheck:
 
     def test_server_unreachable(self) -> None:
         adapter = _make_adapter()
-        mock = _connect_adapter(adapter)
+        _connect_adapter(adapter)
         with patch("hydrag.surreal_adapter.urllib.request.urlopen") as mock_urlopen:
             mock_urlopen.side_effect = OSError("connection refused")
             result = adapter.health_check()

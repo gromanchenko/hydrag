@@ -285,8 +285,14 @@ class SurrealDBAdapter:
             "DEFINE FIELD IF NOT EXISTS embedding ON chunks TYPE array",
             "DEFINE FIELD IF NOT EXISTS metadata ON chunks TYPE object",
             "DEFINE ANALYZER IF NOT EXISTS hydrag_fts TOKENIZERS blank, class FILTERS lowercase, snowball(english)",
-            "DEFINE INDEX IF NOT EXISTS chunks_fts ON chunks FIELDS raw_content, keywords SEARCH ANALYZER hydrag_fts BM25",
-            f"DEFINE INDEX IF NOT EXISTS chunks_vec ON chunks FIELDS embedding HNSW DIMENSION {self._embedding_dim} DIST COSINE",
+            (
+                "DEFINE INDEX IF NOT EXISTS chunks_fts ON chunks"
+                " FIELDS raw_content, keywords SEARCH ANALYZER hydrag_fts BM25"
+            ),
+            (
+                f"DEFINE INDEX IF NOT EXISTS chunks_vec ON chunks"
+                f" FIELDS embedding HNSW DIMENSION {self._embedding_dim} DIST COSINE"
+            ),
             "DEFINE INDEX IF NOT EXISTS chunks_hash_idx ON chunks FIELDS content_hash UNIQUE",
             "DEFINE INDEX IF NOT EXISTS chunks_cid_idx ON chunks FIELDS chunk_id UNIQUE",
             "DEFINE TABLE IF NOT EXISTS calls SCHEMALESS",
@@ -471,18 +477,18 @@ class SurrealDBAdapter:
                         for r in existing_rows
                         if isinstance(r, dict) and "content_hash" in r
                     }
-                    
+
                     sql_statements = ["BEGIN TRANSACTION"]
                     params: dict[str, Any] = {}
                     updates_added = 0
-                    
+
                     for i, (chunk, emb) in enumerate(zip(batch, batch_embs)):
                         if chunk.content_hash in existing_hashes:
                             continue
                         vec = emb
                         if vec is not None and hasattr(vec, "tolist"):
                             vec = vec.tolist()
-                            
+
                         sql_statements.append(
                             f"UPDATE type::thing('chunks', $cid_{i}) SET "
                             f"chunk_id = $cid_{i}, source = $src_{i}, title = $title_{i}, "

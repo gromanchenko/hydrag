@@ -8,12 +8,17 @@ T-742: Pure FTS5 indexing (no --enrich flag)
 T-743: With --enrich, uses LLM to generate summary + keywords per chunk
 """
 
+from __future__ import annotations
+
 import argparse
 import sys
-import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hydrag.sqlite_store import IndexedChunk, SQLiteFTSStore
+
+if TYPE_CHECKING:
+    from hydrag.enrichment import OllamaKeywordExtractor
 
 
 def _chunk_file(path: Path, max_chunk_chars: int = 2000) -> list[IndexedChunk]:
@@ -60,7 +65,7 @@ def _chunk_file(path: Path, max_chunk_chars: int = 2000) -> list[IndexedChunk]:
     return chunks
 
 
-def _build_extractor(provider: str, model: str, host: str) -> "KeywordExtractor | None":
+def _build_extractor(provider: str, model: str, host: str) -> "OllamaKeywordExtractor | None":
     """Build a KeywordExtractor if --enrich is requested (T-743)."""
     if not provider:
         return None

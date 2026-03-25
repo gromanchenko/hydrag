@@ -4,7 +4,6 @@ from ._version import __version__
 from .config import HYDRAG_SPEC_VERSION, HydRAGConfig
 from .core import (
     HydRAG,
-    OllamaProvider,
     crag_supervisor,
     hydrag_search,
     semantic_fallback,
@@ -18,11 +17,11 @@ from .doc2query import (
     compute_adaptive_n,
     smart_truncate,
 )
-from .fusion import CRAGVerdict, RetrievalResult
-from .fusion import rrf_fuse
+from .fusion import CRAGVerdict, RetrievalResult, rrf_fuse
 from .protocols import LLMProvider, StreamingLLMProvider, VectorStoreAdapter
 from .providers.factory import create_llm_provider
 from .providers.huggingface import HuggingFaceProvider
+from .providers.ollama import OllamaProvider
 from .providers.openai_compat import OpenAICompatProvider
 from .sanitize import sanitize_web_content
 from .sqlite_store import IndexedChunk, SQLiteFTSStore

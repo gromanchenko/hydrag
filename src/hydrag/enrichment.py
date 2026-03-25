@@ -15,7 +15,6 @@ import hashlib
 import json
 import logging
 import re
-import urllib.request
 from typing import Any
 
 logger = logging.getLogger(__name__)

@@ -96,7 +96,9 @@ class HydRAGConfig:
         if not (0 < self.fast_path_bm25_threshold <= 1.0):
             raise ValueError(f"fast_path_bm25_threshold must be in (0, 1.0], got {self.fast_path_bm25_threshold}")
         if not (0 <= self.fast_path_confidence_threshold <= 1.0):
-            raise ValueError(f"fast_path_confidence_threshold must be in [0, 1.0], got {self.fast_path_confidence_threshold}")
+            raise ValueError(
+                f"fast_path_confidence_threshold must be in [0, 1.0], got {self.fast_path_confidence_threshold}"
+            )
         if self.rrf_k < 1:
             raise ValueError(f"rrf_k must be >= 1, got {self.rrf_k}")
         # SurrealDB URL scheme validation
@@ -191,12 +193,20 @@ class HydRAGConfig:
             surrealdb_namespace=os.environ.get("HYDRAG_SURREALDB_NAMESPACE", cls.surrealdb_namespace),
             surrealdb_database=os.environ.get("HYDRAG_SURREALDB_DATABASE", cls.surrealdb_database),
             surrealdb_timeout=int(os.environ.get("HYDRAG_SURREALDB_TIMEOUT", str(cls.surrealdb_timeout))),
-            surrealdb_graph_anchors=int(os.environ.get("HYDRAG_SURREALDB_GRAPH_ANCHORS", str(cls.surrealdb_graph_anchors))),
-            surrealdb_graph_max_neighbors=int(os.environ.get("HYDRAG_SURREALDB_GRAPH_MAX_NEIGHBORS", str(cls.surrealdb_graph_max_neighbors))),
+            surrealdb_graph_anchors=int(
+                os.environ.get("HYDRAG_SURREALDB_GRAPH_ANCHORS", str(cls.surrealdb_graph_anchors))
+            ),
+            surrealdb_graph_max_neighbors=int(
+                os.environ.get("HYDRAG_SURREALDB_GRAPH_MAX_NEIGHBORS", str(cls.surrealdb_graph_max_neighbors))
+            ),
             surrealdb_rrf_k=int(os.environ.get("HYDRAG_SURREALDB_RRF_K", str(cls.surrealdb_rrf_k))),
             surrealdb_rrf_weights=os.environ.get("HYDRAG_SURREALDB_RRF_WEIGHTS", cls.surrealdb_rrf_weights),
-            surrealdb_batch_size=int(os.environ.get("HYDRAG_SURREALDB_BATCH_SIZE", str(cls.surrealdb_batch_size))),
-            surrealdb_max_in_flight=int(os.environ.get("HYDRAG_SURREALDB_MAX_IN_FLIGHT", str(cls.surrealdb_max_in_flight))),
+            surrealdb_batch_size=int(
+                os.environ.get("HYDRAG_SURREALDB_BATCH_SIZE", str(cls.surrealdb_batch_size))
+            ),
+            surrealdb_max_in_flight=int(
+                os.environ.get("HYDRAG_SURREALDB_MAX_IN_FLIGHT", str(cls.surrealdb_max_in_flight))
+            ),
         )
         # Handle JSON dictionary for RRF weights
         weights_env = os.environ.get("HYDRAG_RRF_HEAD_WEIGHTS")
