@@ -291,7 +291,7 @@ class SurrealDBAdapter:
             "DEFINE FIELD IF NOT EXISTS summary ON chunks TYPE string",
             "DEFINE FIELD IF NOT EXISTS keywords ON chunks TYPE string",
             "DEFINE FIELD IF NOT EXISTS content_hash ON chunks TYPE string",
-            "DEFINE FIELD IF NOT EXISTS embedding ON chunks TYPE array",
+            "DEFINE FIELD IF NOT EXISTS embedding ON chunks TYPE array<float>",
             "DEFINE FIELD IF NOT EXISTS metadata ON chunks TYPE object",
             "DEFINE ANALYZER IF NOT EXISTS hydrag_fts TOKENIZERS blank, class FILTERS lowercase, snowball(english)",
             (
@@ -512,7 +512,7 @@ class SurrealDBAdapter:
                             "summary": chunk.summary,
                             "keywords": chunk.keywords,
                             "content_hash": chunk.content_hash,
-                            "embedding": vec or [],
+                            "embedding": vec if vec else [0.0] * self._embedding_dim,
                             "metadata": {},
                         })
 
