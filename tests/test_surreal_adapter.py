@@ -288,11 +288,98 @@ class TestConnectionLifecycle:
 
 
 class TestKeywordSearch:
+    def test_normalize_fts_query_strips_punctuation_and_operators(self) -> None:
+        adapter = _make_adapter()
+        assert adapter._normalize_fts_query("0-dimensional properties.") == "0 dimensional properties"
+        assert adapter._normalize_fts_query("AND OR NOT NEAR") == ""
+        # Also verify the token list variant:
+        assert adapter._normalize_fts_tokens("0-dimensional properties.") == ["0", "dimensional", "properties"]
+        assert adapter._normalize_fts_tokens("AND OR NOT NEAR") == []
+
+    def test_build_disjunctive_fts_query(self) -> None:
+        """Verify disjunctive query builder allocates distinct score slots."""
+        from hydrag.surreal_adapter import SurrealDBAdapter
+
+        tokens = ["vitamin", "B12", "deficiency"]
+        sql, params = SurrealDBAdapter._build_disjunctive_fts_query(
+            tokens, select_fields="raw_content",
+        )
+        # 3 tokens → raw_content @0@ @1@ @2@, keywords @3@ @4@ @5@
+        assert "raw_content @0@ $t0" in sql
+        assert "raw_content @1@ $t1" in sql
+        assert "raw_content @2@ $t2" in sql
+        assert "keywords @3@ $t0" in sql
+        assert "keywords @4@ $t1" in sql
+        assert "keywords @5@ $t2" in sql
+        # Score clamping with math::max
+        assert "math::max([search::score(0), 0])" in sql
+        assert "math::max([search::score(5), 0])" in sql
+        # Params
+        assert params["t0"] == "vitamin"
+        assert params["t1"] == "B12"
+        assert params["t2"] == "deficiency"
+        # No $query param (old style)
+        assert "query" not in params
+
+    def test_build_disjunctive_fts_query_single_token(self) -> None:
+        """Single token still gets per-slot allocation."""
+        from hydrag.surreal_adapter import SurrealDBAdapter
+
+        sql, params = SurrealDBAdapter._build_disjunctive_fts_query(
+            ["hello"], select_fields="raw_content",
+        )
+        assert "raw_content @0@ $t0" in sql
+        assert "keywords @1@ $t0" in sql
+        assert params["t0"] == "hello"
+
+    def test_keyword_search_uses_normalized_query(self) -> None:
+        adapter = _make_adapter()
+        _connect_adapter(adapter)
+        captured: list[tuple[str, dict[str, Any] | None]] = []
+
+        def fake_query(sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+            captured.append((sql, params))
+            return []
+
+        adapter._query = fake_query  # type: ignore[method-assign]
+        _ = adapter.keyword_search("0-dimensional properties.")
+
+        assert captured
+        assert captured[0][1] is not None
+        # Disjunctive: per-token params $t0, $t1, $t2
+        assert captured[0][1]["t0"] == "0"
+        assert captured[0][1]["t1"] == "dimensional"
+        assert captured[0][1]["t2"] == "properties"
+        # SQL should have distinct score slots for raw_content and keywords
+        sql = captured[0][0]
+        assert "raw_content @0@" in sql
+        assert "raw_content @1@" in sql
+        assert "raw_content @2@" in sql
+        assert "keywords @3@" in sql
+
+    def test_graph_anchor_search_uses_normalized_query(self) -> None:
+        adapter = _make_adapter()
+        _connect_adapter(adapter)
+        captured: list[tuple[str, dict[str, Any] | None]] = []
+
+        def fake_query(sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+            captured.append((sql, params))
+            return []
+
+        adapter._query = fake_query  # type: ignore[method-assign]
+        _ = adapter.graph_search("0-dimensional properties.", n_results=5)
+
+        assert captured
+        assert captured[0][1] is not None
+        assert captured[0][1]["t0"] == "0"
+        assert captured[0][1]["t1"] == "dimensional"
+        assert captured[0][1]["t2"] == "properties"
+
     def test_returns_results(self) -> None:
         adapter = _make_adapter()
         mock = _connect_adapter(adapter)
         mock.set_response(
-            "SELECT raw_content, search::score(0)",
+            "SELECT raw_content, math::max",
             [{"status": "OK", "result": [
                 {"raw_content": "hello world"},
                 {"raw_content": "foo bar"},
@@ -305,7 +392,7 @@ class TestKeywordSearch:
         adapter = _make_adapter()
         mock = _connect_adapter(adapter)
         mock.set_response(
-            "SELECT raw_content, search::score(0)",
+            "SELECT raw_content, math::max",
             [{"status": "OK", "result": []}],
         )
         results = adapter.keyword_search("nonexistent")
@@ -316,7 +403,7 @@ class TestKeywordSearch:
         adapter = _make_adapter()
         mock = _connect_adapter(adapter)
         mock.set_response(
-            "SELECT raw_content, search::score(0)",
+            "SELECT raw_content, math::max",
             [{"status": "OK", "result": []}],
         )
         # This should not cause any error — it's just a weird search query
@@ -347,7 +434,7 @@ class TestSemanticSearch:
         adapter = _make_adapter(embed_fn=None)
         mock = _connect_adapter(adapter)
         mock.set_response(
-            "SELECT raw_content, search::score(0)",
+            "SELECT raw_content, math::max",
             [{"status": "OK", "result": [
                 {"raw_content": "fts fallback"},
             ]}],
@@ -371,7 +458,7 @@ class TestSemanticSearch:
         adapter = _make_adapter(embed_fn=failing_embed)
         mock = _connect_adapter(adapter)
         mock.set_response(
-            "SELECT raw_content, search::score(0)",
+            "SELECT raw_content, math::max",
             [{"status": "OK", "result": [{"raw_content": "fts result"}]}],
         )
         results = adapter.semantic_search("test")
@@ -452,7 +539,7 @@ class TestGraphSearch:
         adapter = _make_adapter()
         mock = _connect_adapter(adapter)
         mock.set_response(
-            "SELECT chunk_id, raw_content FROM chunks",
+            "SELECT chunk_id, raw_content, math::max",
             [{"status": "OK", "result": []}],
         )
         results = adapter.graph_search("nonexistent")
@@ -464,7 +551,7 @@ class TestGraphSearch:
 
         # _keyword_search_with_ids returns anchors with chunk_id
         mock.set_response(
-            "SELECT chunk_id, raw_content, search::score(0)",
+            "SELECT chunk_id, raw_content, math::max",
             [{"status": "OK", "result": [
                 {"chunk_id": "chunk_abc", "raw_content": "anchor content"},
             ]}],
@@ -490,7 +577,7 @@ class TestGraphSearch:
         )
         mock = _connect_adapter(adapter)
         mock.set_response(
-            "SELECT chunk_id, raw_content, search::score(0)",
+            "SELECT chunk_id, raw_content, math::max",
             [{"status": "OK", "result": [
                 {"chunk_id": "c1", "raw_content": "anchor"},
             ]}],
@@ -637,7 +724,7 @@ class TestResultValidation:
         adapter = _make_adapter()
         mock = _connect_adapter(adapter)
         mock.set_response(
-            "SELECT raw_content, search::score(0)",
+            "SELECT raw_content, math::max",
             [{"status": "ERR", "result": "table not found"}],
         )
         with pytest.raises(RuntimeError, match="statement 0 failed"):

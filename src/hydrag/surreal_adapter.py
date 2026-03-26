@@ -278,6 +278,84 @@ class SurrealDBAdapter:
         self._bridge.run(self._async_connect(), timeout=self._timeout)
         self._write_lock = self._bridge._write_lock
 
+    # Maximum number of disjunctive term clauses to avoid query explosion.
+    # Typical BEIR queries have 5-15 terms; cap protects against adversarial input.
+    _MAX_DISJUNCTIVE_TERMS: int = 16
+
+    @staticmethod
+    def _normalize_fts_tokens(query: str) -> list[str]:
+        """Normalize a natural-language query into clean tokens for SurrealDB FTS.
+
+        Strips punctuation, splits hyphens, removes boolean operators
+        (AND/OR/NOT/NEAR).  Returns a **list** of individual tokens suitable
+        for disjunctive per-term ``@N@`` clauses.
+        """
+        _fts_operators = {"AND", "OR", "NOT", "NEAR"}
+        clean: list[str] = []
+        for raw_token in query.split():
+            sub_tokens = raw_token.split("-")
+            for t in sub_tokens:
+                word = "".join(c for c in t if c.isalnum() or c == "_")
+                if word and word.upper() not in _fts_operators:
+                    clean.append(word)
+        return clean
+
+    @staticmethod
+    def _normalize_fts_query(query: str) -> str:
+        """Convenience wrapper returning space-separated tokens as a string.
+
+        Kept for backward compatibility with tests.
+        """
+        return " ".join(SurrealDBAdapter._normalize_fts_tokens(query))
+
+    @classmethod
+    def _build_disjunctive_fts_query(
+        cls,
+        tokens: list[str],
+        *,
+        select_fields: str = "raw_content",
+    ) -> tuple[str, dict[str, Any]]:
+        """Build a disjunctive (OR) FTS query with per-token score slots.
+
+        SurrealDB ``@@`` with space-separated tokens uses **implicit AND**:
+        all tokens must appear in the document.  To achieve OR-disjunctive
+        recall (like SQLite FTS5 ``MATCH … OR …``), each token gets its own
+        ``@N@`` score slot on the ``raw_content`` column, joined by SQL-level
+        ``OR``.  Keywords column gets one additional slot per token.
+
+        Score slots are allocated as:
+        - raw_content: slots 0 … N-1
+        - keywords:    slots N … 2N-1
+
+        Returns ``(sql, params)`` for ``query_raw``.
+        """
+        n = min(len(tokens), cls._MAX_DISJUNCTIVE_TERMS)
+        tokens = tokens[:n]
+
+        # WHERE clauses: per-token @slot@ on raw_content, then on keywords
+        where_parts: list[str] = []
+        score_parts: list[str] = []
+        params: dict[str, Any] = {}
+
+        for i, token in enumerate(tokens):
+            rc_slot = i
+            kw_slot = n + i
+            where_parts.append(f"raw_content @{rc_slot}@ $t{i}")
+            where_parts.append(f"keywords @{kw_slot}@ $t{i}")
+            score_parts.append(f"math::max([search::score({rc_slot}), 0])")
+            score_parts.append(f"math::max([search::score({kw_slot}), 0])")
+            params[f"t{i}"] = token
+
+        where_clause = " OR ".join(where_parts)
+        score_expr = " + ".join(score_parts)
+
+        sql = (
+            f"SELECT {select_fields}, {score_expr} AS relevance "
+            f"FROM chunks WHERE {where_clause} "
+            f"ORDER BY relevance DESC LIMIT $n_results"
+        )
+        return sql, params
+
     async def _async_init_schema(self) -> None:
         schema_ddl = [
             "DEFINE TABLE IF NOT EXISTS _hydrag_meta SCHEMAFULL",
@@ -314,7 +392,76 @@ class SurrealDBAdapter:
         ]
         for stmt in schema_ddl:
             await self._db.query_raw(stmt)  # type: ignore[union-attr]
+        await self._async_wait_for_indexes_ready(
+            ("chunks_fts_content", "chunks_fts_keywords"),
+            timeout_s=self._timeout,
+        )
         log.info("schema initialized (version=1, dim=%d)", self._embedding_dim)
+
+    async def _async_wait_for_indexes_ready(
+        self,
+        index_names: tuple[str, ...],
+        timeout_s: int,
+    ) -> None:
+        """Wait until Surreal fulltext indexes report ready.
+
+        If the server does not expose readiness metadata, continue without
+        blocking to remain backward-compatible.
+        """
+        if self._db is None:
+            return
+
+        loop = asyncio.get_running_loop()
+
+        for index_name in index_names:
+            deadline = loop.time() + timeout_s
+            while True:
+                raw = await self._db.query_raw(  # type: ignore[union-attr]
+                    f"INFO FOR INDEX {index_name} ON chunks",
+                )
+
+                result = raw.get("result", raw) if isinstance(raw, dict) else raw
+                info: Any = result
+                if isinstance(result, list) and result:
+                    stmt = result[0]
+                    if isinstance(stmt, dict):
+                        info = stmt.get("result", stmt)
+                    else:
+                        info = stmt
+                if isinstance(info, list) and info:
+                    info = info[0]
+
+                status: str | None = None
+                if isinstance(info, dict):
+                    building = info.get("building")
+                    if isinstance(building, dict):
+                        val = building.get("status")
+                        if isinstance(val, str):
+                            status = val
+                    if status is None:
+                        val = info.get("status")
+                        if isinstance(val, str):
+                            status = val
+
+                if status == "ready":
+                    break
+
+                # Some Surreal variants do not expose index build state.
+                if status is None:
+                    log.warning("index readiness metadata unavailable for %s — proceeding without confirmation", index_name)
+                    break
+
+                if status not in {"indexing", "cleaning", "started"}:
+                    raise RuntimeError(
+                        f"Unexpected index status for {index_name}: {status!r}",
+                    )
+
+                if loop.time() >= deadline:
+                    raise TimeoutError(
+                        f"Timed out waiting for index {index_name} to become ready",
+                    )
+
+                await asyncio.sleep(0.2)
 
     # ------------------------------------------------------------------ #
     #  Query layer
@@ -359,13 +506,14 @@ class SurrealDBAdapter:
 
     def keyword_search(self, query: str, n_results: int = 5) -> list[str]:
         self._check_connection()
-        result = self._query(
-            "SELECT raw_content, search::score(0) + search::score(1) AS relevance "
-            "FROM chunks "
-            "WHERE raw_content @0@ $query OR keywords @1@ $query "
-            "ORDER BY relevance DESC LIMIT $n_results",
-            {"query": query, "n_results": n_results},
+        tokens = self._normalize_fts_tokens(query)
+        if not tokens:
+            return []
+        sql, params = self._build_disjunctive_fts_query(
+            tokens, select_fields="raw_content",
         )
+        params["n_results"] = n_results
+        result = self._query(sql, params)
         return [r["raw_content"] for r in result]
 
     def semantic_search(self, query: str, n_results: int = 5) -> list[str]:
@@ -415,13 +563,14 @@ class SurrealDBAdapter:
     ) -> list[dict[str, str]]:
         """Internal: keyword search returning chunk_id + raw_content."""
         self._check_connection()
-        return self._query(
-            "SELECT chunk_id, raw_content, search::score(0) + search::score(1) AS relevance "
-            "FROM chunks "
-            "WHERE raw_content @0@ $query OR keywords @1@ $query "
-            "ORDER BY relevance DESC LIMIT $n_results",
-            {"query": query, "n_results": n_results},
+        tokens = self._normalize_fts_tokens(query)
+        if not tokens:
+            return []
+        sql, params = self._build_disjunctive_fts_query(
+            tokens, select_fields="chunk_id, raw_content",
         )
+        params["n_results"] = n_results
+        return self._query(sql, params)
 
     def graph_search(self, query: str, n_results: int = 5) -> list[str]:
         self._check_connection()
