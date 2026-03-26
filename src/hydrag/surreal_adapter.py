@@ -481,6 +481,12 @@ class SurrealDBAdapter:
                     else [None] * len(batch)
                 )
                 try:
+                    # Fill missing content_hash (UNIQUE index requires non-empty)
+                    for chunk in batch:
+                        if not chunk.content_hash:
+                            chunk.content_hash = hashlib.sha256(
+                                chunk.raw_content.encode("utf-8"),
+                            ).hexdigest()[:16]
                     batch_hashes = [chunk.content_hash for chunk in batch]
                     existing_rows = await self._async_query(
                         "SELECT content_hash FROM chunks "
