@@ -517,21 +517,21 @@ class SurrealDBAdapter:
                         })
 
                     if insert_batch:
-                        result = await self._db.insert("chunks", insert_batch)  # type: ignore[union-attr]
+                        # Use _async_query (query_raw) instead of SDK insert()
+                        # so statement-level ERR status is detected.  SDK insert()
+                        # silently returns the error string when status=="ERR".
+                        result = await self._async_query(
+                            "INSERT INTO chunks $_data RETURN id",
+                            {"_data": insert_batch},
+                        )
                         total_created += len(insert_batch)
-                        # Diagnostic: log first batch result + mid-batch count
                         if batch_start == 0:
                             log.info(
-                                "first batch insert() returned %d records, "
-                                "sample id: %s",
-                                len(result) if isinstance(result, list) else -1,
-                                result[0].get("id", "?") if isinstance(result, list) and result else "empty",
+                                "first batch INSERT returned %d rows, "
+                                "sample: %s",
+                                len(result),
+                                repr(result[0])[:120] if result else "empty",
                             )
-                            mid_rows = await self._async_query(
-                                "SELECT count() AS total FROM chunks GROUP ALL", {},
-                            )
-                            mid_count = mid_rows[0]["total"] if mid_rows else 0
-                            log.info("mid-batch count after first insert: %d", mid_count)
                 except Exception as exc:
                     log.warning("batch insert failed: %s", exc)
                     raise

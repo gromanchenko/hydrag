@@ -52,14 +52,14 @@ class MockSurreal:
 
     async def query(self, sql: str, params: dict[str, Any] | None = None) -> list[Any]:
         """Mimic real SDK query() which unwraps to first statement's inner result."""
-        stmts = await self._statements(sql)
+        stmts = await self._statements(sql, params)
         return stmts[0]["result"] if stmts else []
 
     async def query_raw(self, sql: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return full envelope {"result": [{"status":"OK","result":[...]}]}."""
-        return {"result": await self._statements(sql)}
+        return {"result": await self._statements(sql, params)}
 
-    async def _statements(self, sql: str) -> list[dict[str, Any]]:
+    async def _statements(self, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """Build statement-level envelope list for a SQL string."""
         sql_stripped = sql.strip()
         # Multi-statement (semicolon-separated batched transaction)
@@ -68,7 +68,7 @@ class MockSurreal:
             for part in sql_stripped.split(";"):
                 part = part.strip()
                 if part:
-                    results.extend(await self._statements(part))
+                    results.extend(await self._statements(part, params))
             return results
         # Transaction control
         if sql_stripped.startswith("BEGIN TRANSACTION"):
@@ -82,6 +82,16 @@ class MockSurreal:
         if sql_stripped.startswith("UPDATE "):
             self._create_count += 1
             return [{"status": "OK", "result": []}]
+        # INSERT INTO (via _async_query instead of SDK insert())
+        if sql_stripped.startswith("INSERT INTO "):
+            records = params.get("_data", []) if params else []
+            if isinstance(records, list):
+                self._create_count += len(records)
+            else:
+                self._create_count += 1
+            recs = records if isinstance(records, list) else [records]
+            ids = [{"id": r.get("id", "?")} for r in recs]
+            return [{"status": "OK", "result": ids}]
         # CREATE
         if sql_stripped.startswith("CREATE "):
             self._create_count += 1
