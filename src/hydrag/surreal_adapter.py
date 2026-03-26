@@ -184,6 +184,8 @@ class SurrealDBAdapter:
         rrf_k: int = 60,
         rrf_weights: tuple[float, float] = (1.0, 1.0),
         token: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
         allow_insecure_auth: bool = False,
         batch_size: int = 100,
         max_in_flight: int = 256,
@@ -210,15 +212,16 @@ class SurrealDBAdapter:
                 f"surrealdb_url scheme must be http/https/ws/wss, got {parsed.scheme!r}"
             )
 
-        # Token-over-plaintext guard
-        if token and parsed.scheme in ("http", "ws"):
+        # Credential-over-plaintext guard
+        has_creds = token or (username and password)
+        if has_creds and parsed.scheme in ("http", "ws"):
             if parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
                 if not allow_insecure_auth:
                     raise ValueError(
-                        "Token auth over plaintext (http/ws) requires https/wss "
+                        "Auth over plaintext (http/ws) requires https/wss "
                         "or localhost. Set allow_insecure_auth=True to override."
                     )
-                log.warning("token auth over plaintext to %s", parsed.hostname)
+                log.warning("auth over plaintext to %s", parsed.hostname)
 
         self._url = url
         self._embedding_dim = embedding_dim
@@ -232,6 +235,8 @@ class SurrealDBAdapter:
         self._rrf_k = rrf_k
         self._rrf_weights = rrf_weights
         self._token = token
+        self._username = username
+        self._password = password
         self._allow_insecure_auth = allow_insecure_auth
         self._batch_size = batch_size
         self._graph_inbound_weight = graph_inbound_weight
@@ -259,9 +264,11 @@ class SurrealDBAdapter:
                 pass
         self._db = Surreal(self._url)
         await self._db.connect()
-        await self._db.use(namespace=self._namespace, database=self._database)
-        if self._token:
+        if self._username and self._password:
+            await self._db.signin({"username": self._username, "password": self._password})
+        elif self._token:
             await self._db.authenticate(self._token)
+        await self._db.use(namespace=self._namespace, database=self._database)
         if self._auto_schema:
             await self._async_init_schema()
 

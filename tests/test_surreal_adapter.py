@@ -38,6 +38,9 @@ class MockSurreal:
     async def use(self, namespace: str, database: str) -> None:
         pass
 
+    async def signin(self, vars: dict[str, Any]) -> str:
+        return "mock-token"
+
     async def authenticate(self, token: str) -> None:
         pass
 
