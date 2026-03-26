@@ -266,9 +266,11 @@ class SurrealDBAdapter:
         await self._db.connect()
         if self._username and self._password:
             await self._db.signin({"username": self._username, "password": self._password})
+            log.info("signin ok (username=%s)", self._username)
         elif self._token:
             await self._db.authenticate(self._token)
         await self._db.use(namespace=self._namespace, database=self._database)
+        log.info("use ok (ns=%s, db=%s)", self._namespace, self._database)
         if self._auto_schema:
             await self._async_init_schema()
 
@@ -515,8 +517,21 @@ class SurrealDBAdapter:
                         })
 
                     if insert_batch:
-                        await self._db.insert("chunks", insert_batch)  # type: ignore[union-attr]
+                        result = await self._db.insert("chunks", insert_batch)  # type: ignore[union-attr]
                         total_created += len(insert_batch)
+                        # Diagnostic: log first batch result + mid-batch count
+                        if batch_start == 0:
+                            log.info(
+                                "first batch insert() returned %d records, "
+                                "sample id: %s",
+                                len(result) if isinstance(result, list) else -1,
+                                result[0].get("id", "?") if isinstance(result, list) and result else "empty",
+                            )
+                            mid_rows = await self._async_query(
+                                "SELECT count() AS total FROM chunks GROUP ALL", {},
+                            )
+                            mid_count = mid_rows[0]["total"] if mid_rows else 0
+                            log.info("mid-batch count after first insert: %d", mid_count)
                 except Exception as exc:
                     log.warning("batch insert failed: %s", exc)
                     raise
