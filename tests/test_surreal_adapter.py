@@ -44,6 +44,12 @@ class MockSurreal:
     async def authenticate(self, token: str) -> None:
         pass
 
+    async def insert(self, table: str, data: list[dict[str, Any]] | dict[str, Any]) -> list[dict[str, Any]]:
+        """Mimic SDK insert() — bulk INSERT INTO table."""
+        records = data if isinstance(data, list) else [data]
+        self._create_count += len(records)
+        return records
+
     async def query(self, sql: str, params: dict[str, Any] | None = None) -> list[Any]:
         """Mimic real SDK query() which unwraps to first statement's inner result."""
         stmts = await self._statements(sql)

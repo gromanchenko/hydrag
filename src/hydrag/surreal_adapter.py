@@ -318,6 +318,9 @@ class SurrealDBAdapter:
         # Use query_raw() to get the full envelope [{"status":"OK","result":[...]}]
         # instead of query() which unwraps to only the first statement's inner result.
         raw = await self._db.query_raw(sql, params or {})  # type: ignore[union-attr]
+        # Detect top-level RPC errors (e.g. auth failure, invalid syntax)
+        if isinstance(raw, dict) and raw.get("error") is not None:
+            raise RuntimeError(f"SurrealDB RPC error: {raw['error']}")
         result = raw.get("result", raw) if isinstance(raw, dict) else raw
         rows: list[dict[str, Any]] = []
         if isinstance(result, list):
@@ -488,43 +491,34 @@ class SurrealDBAdapter:
                         if isinstance(r, dict) and "content_hash" in r
                     }
 
-                    sql_statements = ["BEGIN TRANSACTION"]
-                    params: dict[str, Any] = {}
-                    updates_added = 0
-
-                    for i, (chunk, emb) in enumerate(zip(batch, batch_embs)):
+                    # Build batch data for native INSERT (avoids multi-statement
+                    # transaction queries which SurrealDB v2 may not support
+                    # via the query RPC).
+                    insert_batch: list[dict[str, Any]] = []
+                    for chunk, emb in zip(batch, batch_embs):
                         if chunk.content_hash in existing_hashes:
                             continue
                         vec = emb
                         if vec is not None and hasattr(vec, "tolist"):
                             vec = vec.tolist()
-
-                        sql_statements.append(
-                            f"UPDATE type::thing('chunks', $cid_{i}) SET "
-                            f"chunk_id = $cid_{i}, source = $src_{i}, title = $title_{i}, "
-                            f"raw_content = $content_{i}, summary = $summary_{i}, "
-                            f"keywords = $kw_{i}, content_hash = $hash_{i}, "
-                            f"embedding = $vec_{i}, metadata = $meta_{i}"
-                        )
-                        params.update({
-                            f"cid_{i}": chunk.chunk_id,
-                            f"src_{i}": chunk.source,
-                            f"title_{i}": chunk.title,
-                            f"content_{i}": chunk.raw_content,
-                            f"summary_{i}": chunk.summary,
-                            f"kw_{i}": chunk.keywords,
-                            f"hash_{i}": chunk.content_hash,
-                            f"vec_{i}": vec or [],
-                            f"meta_{i}": {},
+                        insert_batch.append({
+                            "id": chunk.chunk_id,
+                            "chunk_id": chunk.chunk_id,
+                            "source": chunk.source,
+                            "title": chunk.title,
+                            "raw_content": chunk.raw_content,
+                            "summary": chunk.summary,
+                            "keywords": chunk.keywords,
+                            "content_hash": chunk.content_hash,
+                            "embedding": vec or [],
+                            "metadata": {},
                         })
-                        updates_added += 1
-                        total_created += 1
 
-                    sql_statements.append("COMMIT TRANSACTION")
-                    if updates_added > 0:
-                        await self._async_query(";\n".join(sql_statements) + ";", params)
+                    if insert_batch:
+                        await self._db.insert("chunks", insert_batch)  # type: ignore[union-attr]
+                        total_created += len(insert_batch)
                 except Exception as exc:
-                    log.warning("batch transaction failed: %s", exc)
+                    log.warning("batch insert failed: %s", exc)
                     raise
 
             # Post-insert count verification
