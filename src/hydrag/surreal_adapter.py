@@ -295,8 +295,12 @@ class SurrealDBAdapter:
             "DEFINE FIELD IF NOT EXISTS metadata ON chunks TYPE object",
             "DEFINE ANALYZER IF NOT EXISTS hydrag_fts TOKENIZERS blank, class FILTERS lowercase, snowball(english)",
             (
-                "DEFINE INDEX IF NOT EXISTS chunks_fts ON chunks"
-                " FIELDS raw_content, keywords SEARCH ANALYZER hydrag_fts BM25"
+                "DEFINE INDEX IF NOT EXISTS chunks_fts_content ON chunks"
+                " FIELDS raw_content SEARCH ANALYZER hydrag_fts BM25"
+            ),
+            (
+                "DEFINE INDEX IF NOT EXISTS chunks_fts_keywords ON chunks"
+                " FIELDS keywords SEARCH ANALYZER hydrag_fts BM25"
             ),
             (
                 f"DEFINE INDEX IF NOT EXISTS chunks_vec ON chunks"
@@ -358,7 +362,7 @@ class SurrealDBAdapter:
         result = self._query(
             "SELECT raw_content, search::score(0) + search::score(1) AS relevance "
             "FROM chunks "
-            "WHERE raw_content @@ $query OR keywords @@ $query "
+            "WHERE raw_content @0@ $query OR keywords @1@ $query "
             "ORDER BY relevance DESC LIMIT $n_results",
             {"query": query, "n_results": n_results},
         )
@@ -414,7 +418,7 @@ class SurrealDBAdapter:
         return self._query(
             "SELECT chunk_id, raw_content, search::score(0) + search::score(1) AS relevance "
             "FROM chunks "
-            "WHERE raw_content @@ $query OR keywords @@ $query "
+            "WHERE raw_content @0@ $query OR keywords @1@ $query "
             "ORDER BY relevance DESC LIMIT $n_results",
             {"query": query, "n_results": n_results},
         )
