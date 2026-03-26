@@ -30,6 +30,7 @@ class MockSurreal:
         self._data: list[dict[str, Any]] = []
         # Pre-canned responses keyed by SQL prefix
         self._responses: dict[str, list[Any]] = {}
+        self._create_count: int = 0
 
     async def connect(self) -> None:
         self._connected = True
@@ -41,18 +42,44 @@ class MockSurreal:
         pass
 
     async def query(self, sql: str, params: dict[str, Any] | None = None) -> list[Any]:
+        """Mimic real SDK query() which unwraps to first statement's inner result."""
+        stmts = await self._statements(sql)
+        return stmts[0]["result"] if stmts else []
+
+    async def query_raw(self, sql: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return full envelope {"result": [{"status":"OK","result":[...]}]}."""
+        return {"result": await self._statements(sql)}
+
+    async def _statements(self, sql: str) -> list[dict[str, Any]]:
+        """Build statement-level envelope list for a SQL string."""
         sql_stripped = sql.strip()
-        # Transaction control / batched queries
+        # Multi-statement (semicolon-separated batched transaction)
+        if ";" in sql_stripped:
+            results: list[dict[str, Any]] = []
+            for part in sql_stripped.split(";"):
+                part = part.strip()
+                if part:
+                    results.extend(await self._statements(part))
+            return results
+        # Transaction control
         if sql_stripped.startswith("BEGIN TRANSACTION"):
             return [{"status": "OK", "result": []}]
         if sql_stripped in ("COMMIT TRANSACTION", "CANCEL TRANSACTION"):
             return [{"status": "OK", "result": []}]
         # Schema DDL
-        if sql_stripped.startswith("DEFINE ") or sql_stripped.startswith("UPDATE "):
+        if sql_stripped.startswith("DEFINE "):
+            return [{"status": "OK", "result": []}]
+        # UPDATE (upsert for indexing)
+        if sql_stripped.startswith("UPDATE "):
+            self._create_count += 1
             return [{"status": "OK", "result": []}]
         # CREATE
         if sql_stripped.startswith("CREATE "):
+            self._create_count += 1
             return [{"status": "OK", "result": []}]
+        # Count query (post-insert verification)
+        if sql_stripped.startswith("SELECT count()"):
+            return [{"status": "OK", "result": [{"total": self._create_count}]}]
         # RELATE
         if sql_stripped.startswith("RELATE "):
             return [{"status": "OK", "result": []}]

@@ -300,7 +300,7 @@ class SurrealDBAdapter:
             "DEFINE TABLE IF NOT EXISTS references SCHEMALESS",
         ]
         for stmt in schema_ddl:
-            await self._db.query(stmt)  # type: ignore[union-attr]
+            await self._db.query_raw(stmt)  # type: ignore[union-attr]
         log.info("schema initialized (version=1, dim=%d)", self._embedding_dim)
 
     # ------------------------------------------------------------------ #
@@ -308,7 +308,10 @@ class SurrealDBAdapter:
     # ------------------------------------------------------------------ #
 
     async def _async_query(self, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-        result = await self._db.query(sql, params or {})  # type: ignore[union-attr]
+        # Use query_raw() to get the full envelope [{"status":"OK","result":[...]}]
+        # instead of query() which unwraps to only the first statement's inner result.
+        raw = await self._db.query_raw(sql, params or {})  # type: ignore[union-attr]
+        result = raw.get("result", raw) if isinstance(raw, dict) else raw
         rows: list[dict[str, Any]] = []
         if isinstance(result, list):
             for i, stmt_result in enumerate(result):
@@ -516,11 +519,22 @@ class SurrealDBAdapter:
                 except Exception as exc:
                     log.warning("batch transaction failed: %s", exc)
                     raise
-            log.info(
-                "indexed %d chunks in %d batches",
-                total_created,
-                (len(chunks) + self._batch_size - 1) // self._batch_size,
+
+            # Post-insert count verification
+            count_rows = await self._async_query(
+                "SELECT count() AS total FROM chunks GROUP ALL", {},
             )
+            db_count = count_rows[0]["total"] if count_rows else 0
+            n_batches = (len(chunks) + self._batch_size - 1) // self._batch_size
+            log.info(
+                "indexed %d chunks in %d batches (db total: %d)",
+                total_created, n_batches, db_count,
+            )
+            if db_count == 0 and total_created > 0:
+                raise RuntimeError(
+                    f"Post-insert verification failed: expected {total_created} "
+                    f"chunks in DB but found {db_count}. Writes may be silently failing."
+                )
             return total_created
 
     def index_edges(self, edges: list[tuple[str, str, str]]) -> int:
