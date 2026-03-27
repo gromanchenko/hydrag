@@ -448,7 +448,10 @@ class SurrealDBAdapter:
 
                 # Some Surreal variants do not expose index build state.
                 if status is None:
-                    log.warning("index readiness metadata unavailable for %s — proceeding without confirmation", index_name)
+                    log.warning(
+                        "index readiness metadata unavailable for %s — proceeding without confirmation",
+                        index_name,
+                    )
                     break
 
                 if status not in {"indexing", "cleaning", "started"}:
