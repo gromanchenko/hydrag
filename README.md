@@ -22,7 +22,7 @@ keywords:
 
 [![PyPI version](https://img.shields.io/pypi/v/hydrag-core.svg)](https://pypi.org/project/hydrag-core/)
 [![Python](https://img.shields.io/pypi/pyversions/hydrag-core.svg)](https://pypi.org/project/hydrag-core/)
-[![License](https://img.shields.io/pypi/l/hydrag-core.svg)](https://github.com/studio-playbook/hydrag-core/blob/main/LICENSE)
+[![License](https://img.shields.io/pypi/l/hydrag-core.svg)](https://github.com/gromanchenko/hydrag/blob/main/LICENSE)
 
 **HydRAG** — Multi-Headed Retrieval-Augmented Generation with CRAG supervision.
 
@@ -54,6 +54,7 @@ With optional extras:
 ```bash
 pip install hydrag-core[chromadb]     # ChromaDB adapter support
 pip install hydrag-core[firecrawl]    # Web fallback via Firecrawl
+pip install hydrag-core[surrealdb]    # SurrealDB adapter support
 pip install hydrag-core[tune]         # CRAG classifier fine-tuning (transformers, torch, onnxruntime)
 pip install hydrag-core[dev]          # Development tools (pytest, ruff, mypy)
 ```
