@@ -38,14 +38,14 @@ class HydRAGConfig:
     rrf_k: int = 60
     min_candidate_pool: int = 8
     web_chunk_limit: int = 3000
-    crag_min_relevance: float = 0.12
+    crag_min_relevance: float = 0.67
     crag_context_chunks: int = 5
     crag_char_limit: int = 1500
     # V2.2: Head 0 BM25 fast-path (§3.0 spec) — on by default
     enable_fast_path: bool = True
-    fast_path_bm25_threshold: float = 0.6
+    fast_path_bm25_threshold: float = 0.67
     # V2.3: Confidence-gated CRAG skip — if fast-path score >= threshold, skip LLM
-    fast_path_confidence_threshold: float = 0.7
+    fast_path_confidence_threshold: float = 0.8
     # V2.3: Streaming CRAG — parse first token for early verdict
     crag_stream: bool = True
     # V2.3: CRAG mode — auto (classifier if available, else LLM), llm, classifier
@@ -57,7 +57,7 @@ class HydRAGConfig:
     enable_head_2_crag: bool = True  # CRAG supervisor
     enable_head_3a_semantic: bool = True  # Semantic fallback
     enable_head_3b_web: bool = False      # Web fallback (also gated by enable_web_fallback)
-    fallback_timeout_s: float = 30.0
+    fallback_timeout_s: float = 5.0
     # V2.3+: Multi-provider LLM support (RFC V3)
     llm_provider: str = "ollama"
     hf_model_id: str = ""

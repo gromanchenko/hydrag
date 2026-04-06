@@ -1,3 +1,23 @@
+---
+id: HYDRAG-CORE-API-REFERENCE
+ticket: null
+category: reference
+status: active
+created: '2026-03-15'
+updated: '2026-04-06'
+author: Claude-Sonnet-4.6
+summary: 'hydrag-core public API reference — HydRAG, HydRAGConfig, VectorStoreAdapter, IndexedChunk, SurrealDBAdapter'
+keywords:
+  hydrag-core: 9
+  api: 8
+  reference: 7
+  surrealdb-adapter: 6
+  vector-store: 6
+  hydrag: 5
+  indexed-chunk: 5
+  rrf: 4
+  crag: 4
+---
 # hydrag-core API Reference
 
 Version: **See `hydrag.__version__`** | Spec: **HydRAG V2.3**

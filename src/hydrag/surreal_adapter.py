@@ -26,6 +26,13 @@ try:
         from surrealdb import AsyncSurreal as Surreal  # type: ignore[import-untyped]
     except ImportError:
         from surrealdb import Surreal  # type: ignore[import-untyped]
+    # RecordID is available in surrealdb>=1.0 (v2-compatible SDK).
+    # Used in RELATE statements to avoid type::thing() parse failure in v2.2.1.
+    try:
+        from surrealdb import RecordID as _SurrealRecordID  # type: ignore[import-untyped]
+        _HAS_SURREAL_RECORD_ID = True
+    except ImportError:
+        _HAS_SURREAL_RECORD_ID = False
 except ImportError as _surreal_err:
     raise ImportError(
         "SurrealDB adapter requires the 'surrealdb' package. "
@@ -38,6 +45,33 @@ from .sqlite_store import IndexedChunk
 log = logging.getLogger("hydrag.surreal_adapter")
 
 T = TypeVar("T")
+
+# --------------------------------------------------------------------------- #
+#  Snowball(english) stop words — must match the server-side hydrag_fts analyzer
+#  so that Python-side token generation does not produce dead score slots.
+# --------------------------------------------------------------------------- #
+_SNOWBALL_EN_STOP_WORDS = frozenset({
+    "a", "about", "above", "after", "again", "against", "all", "am", "an",
+    "and", "any", "are", "aren", "arent", "as", "at", "be", "because",
+    "been", "before", "being", "below", "between", "both", "but", "by",
+    "can", "couldn", "couldnt", "d", "did", "didn", "didnt", "do", "does",
+    "doesn", "doesnt", "doing", "don", "dont", "down", "during", "each",
+    "few", "for", "from", "further", "had", "hadn", "hadnt", "has", "hasn",
+    "hasnt", "have", "haven", "havent", "having", "he", "her", "here",
+    "hers", "herself", "him", "himself", "his", "how", "i", "if", "in",
+    "into", "is", "isn", "isnt", "it", "its", "itself", "just", "ll", "m",
+    "ma", "me", "mightn", "mightnt", "more", "most", "mustn", "mustnt",
+    "my", "myself", "needn", "neednt", "no", "nor", "not", "now", "o",
+    "of", "off", "on", "once", "only", "or", "other", "our", "ours",
+    "ourselves", "out", "over", "own", "re", "s", "same", "shan", "shant",
+    "she", "should", "shouldn", "shouldnt", "so", "some", "such", "t",
+    "than", "that", "the", "their", "theirs", "them", "themselves", "then",
+    "there", "these", "they", "this", "those", "through", "to", "too",
+    "under", "until", "up", "ve", "very", "was", "wasn", "wasnt", "we",
+    "were", "weren", "werent", "what", "when", "where", "which", "while",
+    "who", "whom", "why", "will", "with", "won", "wont", "would", "wouldn",
+    "wouldnt", "y", "you", "your", "yours", "yourself", "yourselves",
+})
 
 # --------------------------------------------------------------------------- #
 #  Allowed graph edge types (whitelist for f-string interpolation safety)
@@ -191,6 +225,9 @@ class SurrealDBAdapter:
         max_in_flight: int = 256,
         graph_inbound_weight: float = 2.0,
         graph_outbound_weight: float = 1.0,
+        assume_fresh: bool = False,
+        deferred_index: bool = False,
+        fts_fields: list[str] | None = None,
     ) -> None:
         # Validate structural parameters
         for name, val in [
@@ -241,6 +278,9 @@ class SurrealDBAdapter:
         self._batch_size = batch_size
         self._graph_inbound_weight = graph_inbound_weight
         self._graph_outbound_weight = graph_outbound_weight
+        self._assume_fresh = assume_fresh
+        self._deferred_index = deferred_index
+        self._fts_fields = fts_fields if fts_fields is not None else ["raw_content", "keywords"]
 
         self._bridge = _AsyncBridge(max_in_flight=max_in_flight)
         self._db: Surreal | None = None
@@ -287,8 +327,9 @@ class SurrealDBAdapter:
         """Normalize a natural-language query into clean tokens for SurrealDB FTS.
 
         Strips punctuation, splits hyphens, removes boolean operators
-        (AND/OR/NOT/NEAR).  Returns a **list** of individual tokens suitable
-        for disjunctive per-term ``@N@`` clauses.
+        (AND/OR/NOT/NEAR), and filters snowball(english) stop words to match
+        the server-side ``hydrag_fts`` analyzer.  Returns a **list** of
+        individual tokens suitable for disjunctive per-term ``@N@`` clauses.
         """
         _fts_operators = {"AND", "OR", "NOT", "NEAR"}
         clean: list[str] = []
@@ -296,8 +337,15 @@ class SurrealDBAdapter:
             sub_tokens = raw_token.split("-")
             for t in sub_tokens:
                 word = "".join(c for c in t if c.isalnum() or c == "_")
-                if word and word.upper() not in _fts_operators:
-                    clean.append(word)
+                if not word:
+                    continue
+                upper = word.upper()
+                lower = word.lower()
+                if upper in _fts_operators:
+                    continue
+                if lower in _SNOWBALL_EN_STOP_WORDS:
+                    continue
+                clean.append(word)
         return clean
 
     @staticmethod
@@ -314,36 +362,38 @@ class SurrealDBAdapter:
         tokens: list[str],
         *,
         select_fields: str = "raw_content",
+        fts_fields: list[str] | None = None,
     ) -> tuple[str, dict[str, Any]]:
         """Build a disjunctive (OR) FTS query with per-token score slots.
 
         SurrealDB ``@@`` with space-separated tokens uses **implicit AND**:
         all tokens must appear in the document.  To achieve OR-disjunctive
         recall (like SQLite FTS5 ``MATCH … OR …``), each token gets its own
-        ``@N@`` score slot on the ``raw_content`` column, joined by SQL-level
-        ``OR``.  Keywords column gets one additional slot per token.
+        ``@N@`` score slot on each FTS field, joined by SQL-level ``OR``.
+
+        When *fts_fields* is ``["raw_content"]`` only, keywords slots are
+        skipped entirely — halving the number of BM25 evaluations.
 
         Score slots are allocated as:
-        - raw_content: slots 0 … N-1
-        - keywords:    slots N … 2N-1
+        - field_0: slots 0 … N-1
+        - field_1: slots N … 2N-1
+        - …
 
         Returns ``(sql, params)`` for ``query_raw``.
         """
+        fields = fts_fields if fts_fields is not None else ["raw_content", "keywords"]
         n = min(len(tokens), cls._MAX_DISJUNCTIVE_TERMS)
         tokens = tokens[:n]
 
-        # WHERE clauses: per-token @slot@ on raw_content, then on keywords
         where_parts: list[str] = []
         score_parts: list[str] = []
         params: dict[str, Any] = {}
 
         for i, token in enumerate(tokens):
-            rc_slot = i
-            kw_slot = n + i
-            where_parts.append(f"raw_content @{rc_slot}@ $t{i}")
-            where_parts.append(f"keywords @{kw_slot}@ $t{i}")
-            score_parts.append(f"math::max([search::score({rc_slot}), 0])")
-            score_parts.append(f"math::max([search::score({kw_slot}), 0])")
+            for f_idx, field in enumerate(fields):
+                slot = f_idx * n + i
+                where_parts.append(f"{field} @{slot}@ $t{i}")
+                score_parts.append(f"math::max([search::score({slot}), 0])")
             params[f"t{i}"] = token
 
         where_clause = " OR ".join(where_parts)
@@ -357,9 +407,20 @@ class SurrealDBAdapter:
         return sql, params
 
     async def _async_init_schema(self) -> None:
+        # Check if a bulk_ingest sentinel exists — if so, a previous deferred-index
+        # run crashed before rebuilding indexes.  Skip index DEFINE here and let
+        # the next index_documents() call handle recovery.
+        sentinel_rows = await self._async_query(
+            "SELECT * FROM _hydrag_meta:bulk_ingest", {},
+        )
+        has_sentinel = bool(sentinel_rows and any(
+            isinstance(r, dict) and r.get("active") for r in sentinel_rows
+        ))
+
         schema_ddl = [
             "DEFINE TABLE IF NOT EXISTS _hydrag_meta SCHEMAFULL",
             "DEFINE FIELD IF NOT EXISTS version ON _hydrag_meta TYPE int",
+            "DEFINE FIELD IF NOT EXISTS active ON _hydrag_meta TYPE option<bool>",
             "UPDATE _hydrag_meta:current SET version = 1",
             "DEFINE TABLE IF NOT EXISTS chunks SCHEMAFULL",
             "DEFINE FIELD IF NOT EXISTS chunk_id ON chunks TYPE string",
@@ -372,31 +433,52 @@ class SurrealDBAdapter:
             "DEFINE FIELD IF NOT EXISTS embedding ON chunks TYPE array<float>",
             "DEFINE FIELD IF NOT EXISTS metadata ON chunks TYPE object",
             "DEFINE ANALYZER IF NOT EXISTS hydrag_fts TOKENIZERS blank, class FILTERS lowercase, snowball(english)",
-            (
-                "DEFINE INDEX IF NOT EXISTS chunks_fts_content ON chunks"
-                " FIELDS raw_content SEARCH ANALYZER hydrag_fts BM25"
-            ),
-            (
-                "DEFINE INDEX IF NOT EXISTS chunks_fts_keywords ON chunks"
-                " FIELDS keywords SEARCH ANALYZER hydrag_fts BM25"
-            ),
-            (
-                f"DEFINE INDEX IF NOT EXISTS chunks_vec ON chunks"
-                f" FIELDS embedding HNSW DIMENSION {self._embedding_dim} DIST COSINE"
-            ),
-            "DEFINE INDEX IF NOT EXISTS chunks_hash_idx ON chunks FIELDS content_hash UNIQUE",
-            "DEFINE INDEX IF NOT EXISTS chunks_cid_idx ON chunks FIELDS chunk_id UNIQUE",
+        ]
+
+        # Only define indexes if no bulk_ingest sentinel (crash recovery guard)
+        if not has_sentinel:
+            schema_ddl.extend([
+                (
+                    "DEFINE INDEX IF NOT EXISTS chunks_fts_content ON chunks"
+                    " FIELDS raw_content SEARCH ANALYZER hydrag_fts BM25"
+                ),
+                (
+                    "DEFINE INDEX IF NOT EXISTS chunks_fts_keywords ON chunks"
+                    " FIELDS keywords SEARCH ANALYZER hydrag_fts BM25"
+                ),
+                (
+                    f"DEFINE INDEX IF NOT EXISTS chunks_vec ON chunks"
+                    f" FIELDS embedding HNSW DIMENSION {self._embedding_dim} DIST COSINE"
+                ),
+                "DEFINE INDEX IF NOT EXISTS chunks_hash_idx ON chunks FIELDS content_hash UNIQUE",
+                "DEFINE INDEX IF NOT EXISTS chunks_cid_idx ON chunks FIELDS chunk_id UNIQUE",
+            ])
+        else:
+            log.warning(
+                "bulk_ingest sentinel detected — skipping index DEFINE "
+                "(indexes will be rebuilt on next index_documents call)"
+            )
+            # Still define UNIQUE indexes needed for insert correctness
+            schema_ddl.extend([
+                "DEFINE INDEX IF NOT EXISTS chunks_hash_idx ON chunks FIELDS content_hash UNIQUE",
+                "DEFINE INDEX IF NOT EXISTS chunks_cid_idx ON chunks FIELDS chunk_id UNIQUE",
+            ])
+
+        schema_ddl.extend([
             "DEFINE TABLE IF NOT EXISTS calls SCHEMALESS",
             "DEFINE TABLE IF NOT EXISTS imports SCHEMALESS",
             "DEFINE TABLE IF NOT EXISTS references SCHEMALESS",
-        ]
+        ])
+
         for stmt in schema_ddl:
-            await self._db.query_raw(stmt)  # type: ignore[union-attr]
-        await self._async_wait_for_indexes_ready(
-            ("chunks_fts_content", "chunks_fts_keywords"),
-            timeout_s=self._timeout,
-        )
-        log.info("schema initialized (version=1, dim=%d)", self._embedding_dim)
+            await self._async_query(stmt)
+
+        if not has_sentinel:
+            await self._async_wait_for_indexes_ready(
+                ("chunks_fts_content", "chunks_fts_keywords"),
+                timeout_s=self._timeout,
+            )
+        log.info("schema initialized (version=1, dim=%d, sentinel=%s)", self._embedding_dim, has_sentinel)
 
     async def _async_wait_for_indexes_ready(
         self,
@@ -447,12 +529,23 @@ class SurrealDBAdapter:
                     break
 
                 # Some Surreal variants do not expose index build state.
+                # Issue a probe FTS query to verify the index is functional
+                # before proceeding — avoids silent 0-hit failures on cold start.
                 if status is None:
                     log.warning(
-                        "index readiness metadata unavailable for %s — proceeding without confirmation",
+                        "index readiness metadata unavailable for %s — probing",
                         index_name,
                     )
-                    break
+                    probe_ok = await self._async_probe_index(index_name)
+                    if probe_ok:
+                        break
+                    if loop.time() >= deadline:
+                        raise TimeoutError(
+                            f"FTS index {index_name} not responding to probe queries "
+                            f"within {timeout_s}s timeout",
+                        )
+                    await asyncio.sleep(0.5)
+                    continue
 
                 if status not in {"indexing", "cleaning", "started"}:
                     raise RuntimeError(
@@ -465,6 +558,65 @@ class SurrealDBAdapter:
                     )
 
                 await asyncio.sleep(0.2)
+
+    async def _async_probe_index(self, index_name: str) -> bool:
+        """Dispatch to FTS or HNSW probe based on index type."""
+        if "vec" in index_name:
+            return await self._async_probe_hnsw_index()
+        return await self._async_probe_fts_index(index_name)
+
+    async def _async_probe_hnsw_index(self) -> bool:
+        """Probe HNSW vector index with a dummy nearest-neighbor query."""
+        probe_vec = [0.0] * self._embedding_dim
+        try:
+            await self._async_query(
+                "SELECT id FROM chunks WHERE embedding <|1|> $vec",
+                {"vec": probe_vec},
+            )
+            log.info("HNSW probe succeeded")
+            return True
+        except Exception as exc:
+            log.debug("HNSW probe failed: %s", exc)
+            return False
+
+    async def _async_probe_fts_index(self, index_name: str) -> bool:
+        """Probe FTS index with a known-present token to verify build completion.
+
+        Samples a real token from stored content rather than using a static probe
+        word, avoiding false-positive readiness when the static word is absent.
+        Returns True only when the probe returns at least one result.
+        """
+        field = "raw_content" if "content" in index_name else "keywords"
+        try:
+            sample_rows = await self._async_query(
+                f"SELECT {field} FROM chunks LIMIT 1", {},
+            )
+        except Exception as exc:
+            log.debug("FTS probe sample failed for %s: %s", index_name, exc)
+            return False
+        if not sample_rows:
+            log.info("FTS probe for %s: no chunks, treating as ready", index_name)
+            return True
+        sample_text = sample_rows[0].get(field, "")
+        probe_tokens = self._normalize_fts_tokens(sample_text)
+        if not probe_tokens:
+            log.info("FTS probe for %s: no tokens in sample, treating as ready", index_name)
+            return True
+        probe_word = probe_tokens[0]
+        try:
+            result = await self._async_query(
+                f"SELECT count() AS n FROM chunks WHERE {field} @0@ $probe LIMIT 1",
+                {"probe": probe_word},
+            )
+            n = result[0].get("n", 0) if result else 0
+            if n > 0:
+                log.info("FTS probe for %s ok (token=%r, n=%d)", index_name, probe_word, n)
+                return True
+            log.debug("FTS probe for %s: 0 results (token=%r)", index_name, probe_word)
+            return False
+        except Exception as exc:
+            log.debug("FTS probe for %s failed: %s", index_name, exc)
+            return False
 
     # ------------------------------------------------------------------ #
     #  Query layer
@@ -513,7 +665,7 @@ class SurrealDBAdapter:
         if not tokens:
             return []
         sql, params = self._build_disjunctive_fts_query(
-            tokens, select_fields="raw_content",
+            tokens, select_fields="raw_content", fts_fields=self._fts_fields,
         )
         params["n_results"] = n_results
         result = self._query(sql, params)
@@ -538,9 +690,14 @@ class SurrealDBAdapter:
         assert len(vec) == self._embedding_dim, (
             f"embed_fn returned dim={len(vec)}, expected {self._embedding_dim}"
         )
+        # Note: <|n|> KNN/HNSW operator is non-functional in SurrealDB v2.2.1
+        # (returns empty results even when index is ready and data is present).
+        # Brute-force fallback: SELECT the cosine score as an alias, ORDER BY it.
+        # SurrealDB v2.2.1 requires the ORDER BY expression to appear in SELECT.
         result = self._query(
-            f"SELECT raw_content FROM chunks WHERE embedding <|{int(n_results)}|> $vec",
-            {"vec": vec},
+            "SELECT raw_content, vector::similarity::cosine(embedding, $vec) AS _score "
+            "FROM chunks ORDER BY _score DESC LIMIT $n",
+            {"vec": vec, "n": int(n_results)},
         )
         return [r["raw_content"] for r in result]
 
@@ -564,13 +721,14 @@ class SurrealDBAdapter:
     def _keyword_search_with_ids(
         self, query: str, n_results: int = 5,
     ) -> list[dict[str, str]]:
-        """Internal: keyword search returning chunk_id + raw_content."""
+        """Internal: keyword search returning chunk_id + source + raw_content."""
         self._check_connection()
         tokens = self._normalize_fts_tokens(query)
         if not tokens:
             return []
         sql, params = self._build_disjunctive_fts_query(
-            tokens, select_fields="chunk_id, raw_content",
+            tokens, select_fields="chunk_id, source, raw_content",
+            fts_fields=self._fts_fields,
         )
         params["n_results"] = n_results
         return self._query(sql, params)
@@ -616,9 +774,99 @@ class SurrealDBAdapter:
         embeddings: list[list[float]] | None = None,
     ) -> int:
         self._check_connection()
+        # Fixed timeout: 1 hour hard cap + rebuild budget for deferred index
+        timeout = max(self._timeout, 3600)
+        if self._deferred_index:
+            timeout += max(0, len(chunks) // 10_000 * 30 + 60)
         return self._bridge.run(
             self._async_index_documents(chunks, embeddings),
-            timeout=self._timeout * max(1, len(chunks) // self._batch_size),
+            timeout=timeout,
+        )
+
+    async def _async_drop_indexes(self, include_unique: bool = False) -> None:
+        """Drop FTS and HNSW indexes (for deferred rebuild).
+
+        Args:
+            include_unique: When True, also drops the two UNIQUE B-tree indexes
+                (chunks_hash_idx, chunks_cid_idx).  Use only on fresh databases
+                where insert deduplication is guaranteed by the caller (e.g. the
+                microbenchmark with assume_fresh=True and a single writer).
+                Production default is False — UNIQUE indexes guard against
+                duplicate records on reconnect after a crash.
+        """
+        drop_stmts = [
+            "REMOVE INDEX IF EXISTS chunks_fts_content ON chunks",
+            "REMOVE INDEX IF EXISTS chunks_fts_keywords ON chunks",
+            "REMOVE INDEX IF EXISTS chunks_vec ON chunks",
+        ]
+        if include_unique:
+            drop_stmts += [
+                "REMOVE INDEX IF EXISTS chunks_hash_idx ON chunks",
+                "REMOVE INDEX IF EXISTS chunks_cid_idx ON chunks",
+            ]
+        for stmt in drop_stmts:
+            await self._async_query(stmt)
+        log.info(
+            "deferred_index: dropped FTS + HNSW indexes%s",
+            " + UNIQUE" if include_unique else "",
+        )
+
+    async def _async_rebuild_indexes(
+        self,
+        total_created: int,
+        include_unique: bool = False,
+    ) -> None:
+        """Rebuild FTS and HNSW indexes after bulk insert.
+
+        Args:
+            total_created: Number of chunks inserted; drives dynamic rebuild timeout.
+            include_unique: When True, also recreates the two UNIQUE B-tree indexes
+                (chunks_hash_idx, chunks_cid_idx) that were dropped by a preceding
+                _async_drop_indexes(include_unique=True) call.  Must be paired
+                symmetrically — drop and rebuild both use the same value.
+        """
+        log.info("deferred_index: rebuilding indexes over %d chunks", total_created)
+        rebuild_stmts = [
+            (
+                "DEFINE INDEX IF NOT EXISTS chunks_fts_content ON chunks"
+                " FIELDS raw_content SEARCH ANALYZER hydrag_fts BM25"
+            ),
+        ]
+        if "keywords" in self._fts_fields:
+            rebuild_stmts.append(
+                "DEFINE INDEX IF NOT EXISTS chunks_fts_keywords ON chunks"
+                " FIELDS keywords SEARCH ANALYZER hydrag_fts BM25"
+            )
+        rebuild_stmts.append(
+            f"DEFINE INDEX IF NOT EXISTS chunks_vec ON chunks"
+            f" FIELDS embedding HNSW DIMENSION {self._embedding_dim} DIST COSINE"
+        )
+        if include_unique:
+            rebuild_stmts += [
+                "DEFINE INDEX IF NOT EXISTS chunks_hash_idx ON chunks FIELDS content_hash UNIQUE",
+                "DEFINE INDEX IF NOT EXISTS chunks_cid_idx ON chunks FIELDS chunk_id UNIQUE",
+            ]
+        for stmt in rebuild_stmts:
+            await self._async_query(stmt)
+
+        # Dynamic timeout: at least self._timeout, or ~30s per 10K docs
+        rebuild_timeout = max(self._timeout, total_created // 10_000 * 30 + 60)
+        wait_indexes: list[str] = ["chunks_fts_content"]
+        if "keywords" in self._fts_fields:
+            wait_indexes.append("chunks_fts_keywords")
+        if self._embedding_dim > 1:
+            wait_indexes.append("chunks_vec")
+        await self._async_wait_for_indexes_ready(
+            tuple(wait_indexes),
+            timeout_s=rebuild_timeout,
+        )
+        # Clear sentinel
+        await self._async_query(
+            "UPDATE _hydrag_meta:bulk_ingest SET active = false",
+        )
+        log.info(
+            "deferred_index: indexes ready, sentinel cleared%s",
+            " (UNIQUE rebuilt)" if include_unique else "",
         )
 
     async def _async_index_documents(
@@ -628,91 +876,138 @@ class SurrealDBAdapter:
     ) -> int:
         assert self._write_lock is not None
         async with self._write_lock:
-            total_created = 0
-            for batch_start in range(0, len(chunks), self._batch_size):
-                batch = chunks[batch_start: batch_start + self._batch_size]
-                batch_embs = (
-                    embeddings[batch_start: batch_start + self._batch_size]
-                    if embeddings
-                    else [None] * len(batch)
+            use_deferred = self._deferred_index
+
+            # Check for stale sentinel from a previous crashed deferred run
+            if not use_deferred:
+                sentinel_rows = await self._async_query(
+                    "SELECT active FROM _hydrag_meta:bulk_ingest", {},
                 )
-                try:
-                    # Fill missing content_hash (UNIQUE index requires non-empty)
-                    for chunk in batch:
-                        if not chunk.content_hash:
-                            chunk.content_hash = hashlib.sha256(
-                                chunk.raw_content.encode("utf-8"),
-                            ).hexdigest()[:16]
-                    batch_hashes = [chunk.content_hash for chunk in batch]
-                    existing_rows = await self._async_query(
-                        "SELECT content_hash FROM chunks "
-                        "WHERE content_hash IN $hashes",
-                        {"hashes": batch_hashes},
+                stale = any(
+                    isinstance(r, dict) and r.get("active")
+                    for r in sentinel_rows
+                )
+                if stale:
+                    log.warning(
+                        "stale bulk_ingest sentinel detected — "
+                        "forcing deferred index rebuild path"
                     )
-                    existing_hashes: set[str] = {
-                        r["content_hash"]
-                        for r in existing_rows
-                        if isinstance(r, dict) and "content_hash" in r
-                    }
+                    use_deferred = True
 
-                    # Build batch data for native INSERT (avoids multi-statement
-                    # transaction queries which SurrealDB v2 may not support
-                    # via the query RPC).
-                    insert_batch: list[dict[str, Any]] = []
-                    for chunk, emb in zip(batch, batch_embs):
-                        if chunk.content_hash in existing_hashes:
-                            continue
-                        vec = emb
-                        if vec is not None and hasattr(vec, "tolist"):
-                            vec = vec.tolist()
-                        insert_batch.append({
-                            "id": chunk.chunk_id,
-                            "chunk_id": chunk.chunk_id,
-                            "source": chunk.source,
-                            "title": chunk.title,
-                            "raw_content": chunk.raw_content,
-                            "summary": chunk.summary,
-                            "keywords": chunk.keywords,
-                            "content_hash": chunk.content_hash,
-                            "embedding": vec if vec else [0.0] * self._embedding_dim,
-                            "metadata": {},
-                        })
+            if use_deferred:
+                # Set sentinel BEFORE dropping indexes (crash recovery)
+                await self._async_query(
+                    "UPDATE _hydrag_meta:bulk_ingest SET active = true",
+                )
+                await self._async_drop_indexes()
 
-                    if insert_batch:
-                        # Use _async_query (query_raw) instead of SDK insert()
-                        # so statement-level ERR status is detected.  SDK insert()
-                        # silently returns the error string when status=="ERR".
-                        result = await self._async_query(
-                            "INSERT INTO chunks $_data RETURN id",
-                            {"_data": insert_batch},
-                        )
-                        total_created += len(insert_batch)
-                        if batch_start == 0:
-                            log.info(
-                                "first batch INSERT returned %d rows, "
-                                "sample: %s",
-                                len(result),
-                                repr(result[0])[:120] if result else "empty",
+            total_created = 0
+            try:
+                for batch_start in range(0, len(chunks), self._batch_size):
+                    batch = chunks[batch_start: batch_start + self._batch_size]
+                    batch_embs = (
+                        embeddings[batch_start: batch_start + self._batch_size]
+                        if embeddings
+                        else [None] * len(batch)
+                    )
+                    try:
+                        # Fill missing content_hash (128-bit: MEDIUM-002 fix)
+                        for chunk in batch:
+                            if not chunk.content_hash:
+                                chunk.content_hash = hashlib.sha256(
+                                    chunk.raw_content.encode("utf-8"),
+                                ).hexdigest()[:32]
+
+                        existing_hashes: set[str] = set()
+                        if not self._assume_fresh:
+                            batch_hashes = [chunk.content_hash for chunk in batch]
+                            existing_rows = await self._async_query(
+                                "SELECT content_hash FROM chunks "
+                                "WHERE content_hash IN $hashes",
+                                {"hashes": batch_hashes},
                             )
-                except Exception as exc:
-                    log.warning("batch insert failed: %s", exc)
-                    raise
+                            existing_hashes = {
+                                r["content_hash"]
+                                for r in existing_rows
+                                if isinstance(r, dict) and "content_hash" in r
+                            }
 
-            # Post-insert count verification
-            count_rows = await self._async_query(
-                "SELECT count() AS total FROM chunks GROUP ALL", {},
-            )
-            db_count = count_rows[0]["total"] if count_rows else 0
-            n_batches = (len(chunks) + self._batch_size - 1) // self._batch_size
-            log.info(
-                "indexed %d chunks in %d batches (db total: %d)",
-                total_created, n_batches, db_count,
-            )
+                        insert_batch: list[dict[str, Any]] = []
+                        batch_seen: set[str] = set()
+                        for chunk, emb in zip(batch, batch_embs):
+                            if chunk.content_hash in existing_hashes:
+                                continue
+                            if chunk.content_hash in batch_seen:
+                                continue
+                            batch_seen.add(chunk.content_hash)
+                            vec = emb
+                            if vec is not None and hasattr(vec, "tolist"):
+                                vec = vec.tolist()
+                            insert_batch.append({
+                                "id": chunk.chunk_id,
+                                "chunk_id": chunk.chunk_id,
+                                "source": chunk.source,
+                                "title": chunk.title,
+                                "raw_content": chunk.raw_content,
+                                "summary": chunk.summary,
+                                "keywords": chunk.keywords,
+                                "content_hash": chunk.content_hash,
+                                "embedding": vec if vec else [0.0] * self._embedding_dim,
+                                "metadata": {},
+                            })
+
+                        if insert_batch:
+                            result = await self._async_query(
+                                "INSERT INTO chunks $_data RETURN id",
+                                {"_data": insert_batch},
+                            )
+                            total_created += len(insert_batch)
+                            if batch_start == 0:
+                                log.info(
+                                    "first batch INSERT returned %d rows, "
+                                    "sample: %s",
+                                    len(result),
+                                    repr(result[0])[:120] if result else "empty",
+                                )
+                    except Exception as exc:
+                        log.warning(
+                            "batch insert failed at offset %d (%d created so far): %s",
+                            batch_start, total_created, exc,
+                        )
+                        raise
+            finally:
+                # Post-insert count verification (runs even on partial failure).
+                # Wrapped in try/except so a transient query failure does not
+                # prevent the deferred-index rebuild from running (P10-MEDIUM-001).
+                try:
+                    count_rows = await self._async_query(
+                        "SELECT count() AS total FROM chunks GROUP ALL", {},
+                    )
+                    db_count = count_rows[0]["total"] if count_rows else 0
+                except Exception as count_exc:
+                    log.warning(
+                        "post-insert count verification failed: %s", count_exc,
+                    )
+                    db_count = 0
+                n_batches = (len(chunks) + self._batch_size - 1) // self._batch_size
+                log.info(
+                    "indexed %d chunks in %d batches (db total: %d)",
+                    total_created, n_batches, db_count,
+                )
+
+                if use_deferred:
+                    # Use max(total_created, db_count) so the rebuild timeout
+                    # accounts for pre-existing rows during stale-sentinel
+                    # recovery, not just the rows inserted in this call.
+                    rebuild_row_estimate = max(total_created, db_count)
+                    await self._async_rebuild_indexes(rebuild_row_estimate)
+
             if db_count == 0 and total_created > 0:
                 raise RuntimeError(
                     f"Post-insert verification failed: expected {total_created} "
                     f"chunks in DB but found {db_count}. Writes may be silently failing."
                 )
+
             return total_created
 
     def index_edges(self, edges: list[tuple[str, str, str]]) -> int:
@@ -748,11 +1043,23 @@ class SurrealDBAdapter:
                     log.debug("edge %s already exists, skipping", edge_hash)
                     continue
                 try:
-                    await self._async_query(
-                        f"RELATE type::thing('chunks', $src)->{edge_type}->type::thing('chunks', $tgt) "
-                        f"SET id = type::thing('{edge_type}', $edge_id)",
-                        {"src": src_id, "tgt": tgt_id, "edge_id": edge_hash},
-                    )
+                    if _HAS_SURREAL_RECORD_ID:
+                        # type::thing() fails in RELATE subject position in SurrealDB v2.2.1
+                        # (Parse error: Unexpected token '::'). Use RecordID bound params instead.
+                        await self._async_query(
+                            f"RELATE $from_id->{edge_type}->$to_id SET id = $edge_id",
+                            {
+                                "from_id": _SurrealRecordID("chunks", src_id),
+                                "to_id": _SurrealRecordID("chunks", tgt_id),
+                                "edge_id": _SurrealRecordID(edge_type, edge_hash),
+                            },
+                        )
+                    else:
+                        await self._async_query(
+                            f"RELATE type::thing('chunks', $src)->{edge_type}->type::thing('chunks', $tgt) "
+                            f"SET id = type::thing('{edge_type}', $edge_id)",
+                            {"src": src_id, "tgt": tgt_id, "edge_id": edge_hash},
+                        )
                     created += 1
                 except RuntimeError as exc:
                     if "already exists" in str(exc).lower():
@@ -781,7 +1088,8 @@ class SurrealDBAdapter:
         http_scheme = {"ws": "http", "wss": "https"}.get(
             parsed_url.scheme, parsed_url.scheme
         )
-        http_url = urlunparse(parsed_url._replace(scheme=http_scheme))
+        # Strip path (e.g. /rpc) so the health URL is http://host:port/health
+        http_url = urlunparse(parsed_url._replace(scheme=http_scheme, path=""))
         try:
             req = urllib.request.Request(f"{http_url}/health", method="GET")
             urllib.request.urlopen(req, timeout=self._timeout)  # noqa: S310

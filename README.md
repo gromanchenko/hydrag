@@ -190,12 +190,12 @@ All settings can be set via environment variables (`HYDRAG_` prefix) or passed d
 | `rrf_k` | `HYDRAG_RRF_K` | `60` | RRF smoothing constant |
 | `min_candidate_pool` | `HYDRAG_MIN_CANDIDATE_POOL` | `8` | Minimum candidates per head |
 | `web_chunk_limit` | `HYDRAG_WEB_CHUNK_LIMIT` | `3000` | Max chars per web chunk after sanitization |
-| `crag_min_relevance` | `HYDRAG_CRAG_MIN_RELEVANCE` | `0.12` | Minimum relevance threshold for CRAG |
+| `crag_min_relevance` | `HYDRAG_CRAG_MIN_RELEVANCE` | `0.67` | Minimum relevance threshold for CRAG |
 | `crag_context_chunks` | `HYDRAG_CRAG_CONTEXT_CHUNKS` | `5` | Chunks sent to CRAG supervisor |
 | `crag_char_limit` | `HYDRAG_CRAG_CHAR_LIMIT` | `1500` | Per-chunk character limit in CRAG prompt |
 | `enable_fast_path` | `HYDRAG_ENABLE_FAST_PATH` | `true` | Head 0 BM25 fast-path |
-| `fast_path_bm25_threshold` | `HYDRAG_FAST_PATH_BM25_THRESHOLD` | `0.6` | BM25 score threshold for fast-path |
-| `fast_path_confidence_threshold` | `HYDRAG_FAST_PATH_CONFIDENCE_THRESHOLD` | `0.7` | Score threshold to skip CRAG entirely |
+| `fast_path_bm25_threshold` | `HYDRAG_FAST_PATH_BM25_THRESHOLD` | `0.67` | BM25 score threshold for fast-path |
+| `fast_path_confidence_threshold` | `HYDRAG_FAST_PATH_CONFIDENCE_THRESHOLD` | `0.8` | Score threshold to skip CRAG entirely |
 | `crag_stream` | `HYDRAG_CRAG_STREAM` | `true` | Parse first token for early CRAG verdict |
 | `crag_mode` | `HYDRAG_CRAG_MODE` | `"auto"` | `"auto"`, `"llm"`, or `"classifier"` |
 | `crag_classifier_path` | `HYDRAG_CRAG_CLASSIFIER_PATH` | `""` | Path to ONNX classifier model |
@@ -204,7 +204,7 @@ All settings can be set via environment variables (`HYDRAG_` prefix) or passed d
 | `enable_head_2_crag` | `HYDRAG_ENABLE_HEAD_2_CRAG` | `true` | CRAG supervisor head |
 | `enable_head_3a_semantic` | `HYDRAG_ENABLE_HEAD_3A_SEMANTIC` | `true` | Semantic fallback head |
 | `enable_head_3b_web` | `HYDRAG_ENABLE_HEAD_3B_WEB` | `false` | Web fallback head |
-| `fallback_timeout_s` | `HYDRAG_FALLBACK_TIMEOUT_S` | `30.0` | Timeout for fallback head futures |
+| `fallback_timeout_s` | `HYDRAG_FALLBACK_TIMEOUT_S` | `5.0` | Timeout for fallback head futures |
 | `rrf_head_weights` | `HYDRAG_RRF_HEAD_WEIGHTS` | *(JSON)* | Per-head RRF weight map |
 
 ```python
@@ -266,7 +266,7 @@ Query → [Profile Router]
 
 ```bash
 # Clone and install in development mode
-git clone https://github.com/studio-playbook/hydrag-core.git
+git clone https://github.com/gromanchenko/hydrag.git
 cd hydrag-core
 pip install -e ".[dev]"
 

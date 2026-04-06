@@ -6,12 +6,36 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
-## [1.3.0] — 2026-03-23
+## [1.3.0] — 2026-04-06
 
 ### Added
 - **SurrealDB adapter** (T-888): `SurrealDBAdapter` implementing `VectorStoreAdapter` via `surrealdb` Python SDK over WebSocket. Supports keyword (BM25), semantic (HNSW KNN), hybrid (client-side RRF), and graph search (SurrealQL traversal). Async-to-sync bridge via daemon-thread event loop with backpressure, cancellation, and fork safety. Optional dependency: `pip install hydrag-core[surrealdb]`.
 - **10 new config fields**: `surrealdb_url`, `surrealdb_namespace`, `surrealdb_database`, `surrealdb_timeout`, `surrealdb_graph_anchors`, `surrealdb_graph_max_neighbors`, `surrealdb_rrf_k`, `surrealdb_rrf_weights`, `surrealdb_batch_size`, `surrealdb_max_in_flight` with `HYDRAG_SURREALDB_*` env var mapping.
 - **Conditional export**: `from hydrag import SurrealDBAdapter` with actionable `ImportError` when SDK missing.
+- **SurrealDB v2.2.1 compatibility layer** in `surreal_adapter.py`:
+  - `RecordID`-bound params for RELATE statements (`_HAS_SURREAL_RECORD_ID` guard with `type::thing()` fallback).
+  - Health-check URL path stripping: `parsed_url._replace(scheme=http_scheme, path="")` removes the `/rpc` path so the health probe hits the correct root endpoint.
+  - `semantic_search` brute-force cosine fallback: `SELECT raw_content, vector::similarity::cosine(embedding, $vec) AS _score FROM chunks ORDER BY _score DESC LIMIT $n` replaces the broken `<|n|>` ANN operator (upstream regression in v2.2.1; O(n) scan until fixed upstream).
+
+### Fixed
+- **HNSW ANN operator** `<|n|>` silently returns empty results in SurrealDB v2.2.1; brute-force cosine ORDER BY is used as fallback.
+- **RELATE type binding** now uses `surrealdb.RecordID` bound params (preferred) with `type::thing()` string interpolation as fallback, preventing `RecordId` deprecation warnings.
+
+---
+
+## [1.2.34] — 2026-03-21
+
+### Fixed
+- **FTS5 query escape** (L1 follow-up): Periods now stripped from FTS5 query tokens (previously preserved; caused syntax errors on trailing dots). Hyphens split compound words into sub-tokens for independent matching (e.g. `"0-dimensional"` → `["0", "dimensional"]`).
+
+### Changed
+- **License copyright**: Updated to `G.Romanchenko <goshka@gmail.com>`.
+- **Version reconciliation**: Continued from GitHub baseline 1.2.33 and set release to 1.2.34 to avoid version rollback while preserving semantic ordering for PyPI.
+
+## [1.2.9–1.2.33] — 2026-03-18 to 2026-03-20
+
+### Note
+Auto-bumped patch versions with **no functional changes** beyond 1.2.8. Published to PyPI by the pre-commit auto-bump hook (`scripts/hydrag_bump_patch.py`). Hook disabled in 1.2.34.
 
 ## [1.2.8] — 2026-03-18
 
