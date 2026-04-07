@@ -4,7 +4,7 @@ category: report
 status: active
 created: '2026-03-10'
 updated: '2026-04-07'
-summary: 'hydrag-core version history — all notable changes in Keep a Changelog format, from v0.1.0a1 through v1.3.0'
+summary: 'hydrag-core version history — all notable changes in Keep a Changelog format, from v0.1.0a1 through v1.3.3'
 keywords:
   hydrag-core: 9
   changelog: 8
@@ -21,6 +21,16 @@ keywords:
 All notable changes to `hydrag-core` are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning: [SemVer](https://semver.org/).
+
+---
+
+## [1.3.1] — 2026-04-07
+
+### Fixed
+
+- **`surreal_adapter.py`**: Add `DEFAULT 0` to `_hydrag_meta.version` field DDL to prevent null reads on fresh databases.
+- Strip internal YAML frontmatter from PyPI long description via `hatch_build.py` metadata hook.
+- Remove `author` and `ticket` fields from public-facing docs.
 
 ---
 
