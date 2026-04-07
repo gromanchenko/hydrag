@@ -1,11 +1,9 @@
 ---
 id: HYDRAG-CORE-CHANGELOG
-ticket: null
 category: report
 status: active
 created: '2026-03-10'
 updated: '2026-04-07'
-author: Claude-Sonnet-4.6
 summary: 'hydrag-core version history — all notable changes in Keep a Changelog format, from v0.1.0a1 through v1.3.0'
 keywords:
   hydrag-core: 9

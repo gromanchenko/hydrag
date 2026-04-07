@@ -419,7 +419,7 @@ class SurrealDBAdapter:
 
         schema_ddl = [
             "DEFINE TABLE IF NOT EXISTS _hydrag_meta SCHEMAFULL",
-            "DEFINE FIELD IF NOT EXISTS version ON _hydrag_meta TYPE int",
+            "DEFINE FIELD IF NOT EXISTS version ON _hydrag_meta TYPE int DEFAULT 0",
             "DEFINE FIELD IF NOT EXISTS active ON _hydrag_meta TYPE option<bool>",
             "UPDATE _hydrag_meta:current SET version = 1",
             "DEFINE TABLE IF NOT EXISTS chunks SCHEMAFULL",

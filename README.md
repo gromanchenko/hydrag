@@ -1,11 +1,9 @@
 ---
 id: HYDRAG-CORE-README
-ticket: null
 category: guide
 status: active
 created: '2026-03-10'
 updated: '2026-04-07'
-author: Claude-Sonnet-4.6
 summary: 'hydrag-core — Multi-Headed RAG with CRAG supervision; installation, quickstart, configuration, and adapter guide'
 keywords:
   hydrag-core: 9
