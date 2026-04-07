@@ -1,3 +1,25 @@
+---
+id: HYDRAG-CORE-README
+ticket: null
+category: guide
+status: active
+created: '2026-03-10'
+updated: '2026-04-07'
+author: Claude-Sonnet-4.6
+summary: 'hydrag-core — Multi-Headed RAG with CRAG supervision; installation, quickstart, configuration, and adapter guide'
+keywords:
+  hydrag-core: 9
+  retrieval-augmented-generation: 8
+  crag: 7
+  rrf: 7
+  multi-headed: 6
+  installation: 5
+  vector-store-adapter: 5
+  ollama: 4
+  sqlite: 3
+  surrealdb: 3
+---
+
 # hydrag-core
 
 [![PyPI version](https://img.shields.io/pypi/v/hydrag-core.svg)](https://pypi.org/project/hydrag-core/)

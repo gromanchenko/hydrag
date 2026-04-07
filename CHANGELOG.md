@@ -1,3 +1,23 @@
+---
+id: HYDRAG-CORE-CHANGELOG
+ticket: null
+category: report
+status: active
+created: '2026-03-10'
+updated: '2026-04-07'
+author: Claude-Sonnet-4.6
+summary: 'hydrag-core version history — all notable changes in Keep a Changelog format, from v0.1.0a1 through v1.3.0'
+keywords:
+  hydrag-core: 9
+  changelog: 8
+  versioning: 6
+  surrealdb: 6
+  releases: 5
+  crag-classifier: 5
+  sqlite: 4
+  rrf: 3
+---
+
 # Changelog
 
 All notable changes to `hydrag-core` are documented here.
