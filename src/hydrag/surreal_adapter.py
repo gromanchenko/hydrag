@@ -901,80 +901,112 @@ class SurrealDBAdapter:
                 )
                 await self._async_drop_indexes()
 
+            # assume_fresh: pre-compute hashes and globally deduplicate across
+            # all batches. Without per-batch SELECT guards, concurrent batches
+            # have no DB-side dedup gate (UNIQUE index is kept to preserve integrity
+            # on rebuild), so inter-batch collisions must be resolved here.
+            if self._assume_fresh:
+                hash_seen: set[str] = set()
+                deduped_chunks: list[IndexedChunk] = []
+                deduped_embs: list[list[float]] | None = [] if embeddings is not None else None
+                for i, chunk in enumerate(chunks):
+                    if not chunk.content_hash:
+                        chunk.content_hash = hashlib.sha256(
+                            chunk.raw_content.encode("utf-8"),
+                        ).hexdigest()[:32]
+                    if chunk.content_hash not in hash_seen:
+                        hash_seen.add(chunk.content_hash)
+                        deduped_chunks.append(chunk)
+                        if deduped_embs is not None:
+                            assert embeddings is not None
+                            deduped_embs.append(embeddings[i])
+                n_dropped = len(chunks) - len(deduped_chunks)
+                if n_dropped:
+                    log.info("assume_fresh: pre-dedup dropped %d duplicate hashes", n_dropped)
+                chunks = deduped_chunks
+                embeddings = deduped_embs if deduped_embs is not None else embeddings
+
             total_created = 0
-            try:
-                for batch_start in range(0, len(chunks), self._batch_size):
-                    batch = chunks[batch_start: batch_start + self._batch_size]
-                    batch_embs = (
-                        embeddings[batch_start: batch_start + self._batch_size]
-                        if embeddings
-                        else [None] * len(batch)
+            _insert_sem = asyncio.Semaphore(8)
+
+            async def _insert_one_batch(batch_start: int) -> int:
+                batch = chunks[batch_start: batch_start + self._batch_size]
+                batch_embs = (
+                    embeddings[batch_start: batch_start + self._batch_size]
+                    if embeddings
+                    else [None] * len(batch)
+                )
+                # Fill missing content_hash (128-bit: MEDIUM-002 fix)
+                for chunk in batch:
+                    if not chunk.content_hash:
+                        chunk.content_hash = hashlib.sha256(
+                            chunk.raw_content.encode("utf-8"),
+                        ).hexdigest()[:32]
+
+                existing_hashes: set[str] = set()
+                if not self._assume_fresh:
+                    batch_hashes = [chunk.content_hash for chunk in batch]
+                    existing_rows = await self._async_query(
+                        "SELECT content_hash FROM chunks "
+                        "WHERE content_hash IN $hashes",
+                        {"hashes": batch_hashes},
                     )
-                    try:
-                        # Fill missing content_hash (128-bit: MEDIUM-002 fix)
-                        for chunk in batch:
-                            if not chunk.content_hash:
-                                chunk.content_hash = hashlib.sha256(
-                                    chunk.raw_content.encode("utf-8"),
-                                ).hexdigest()[:32]
+                    existing_hashes = {
+                        r["content_hash"]
+                        for r in existing_rows
+                        if isinstance(r, dict) and "content_hash" in r
+                    }
 
-                        existing_hashes: set[str] = set()
-                        if not self._assume_fresh:
-                            batch_hashes = [chunk.content_hash for chunk in batch]
-                            existing_rows = await self._async_query(
-                                "SELECT content_hash FROM chunks "
-                                "WHERE content_hash IN $hashes",
-                                {"hashes": batch_hashes},
-                            )
-                            existing_hashes = {
-                                r["content_hash"]
-                                for r in existing_rows
-                                if isinstance(r, dict) and "content_hash" in r
-                            }
+                insert_batch: list[dict[str, Any]] = []
+                batch_seen: set[str] = set()
+                for chunk, emb in zip(batch, batch_embs):
+                    if chunk.content_hash in existing_hashes:
+                        continue
+                    if chunk.content_hash in batch_seen:
+                        continue
+                    batch_seen.add(chunk.content_hash)
+                    vec = emb
+                    if vec is not None and hasattr(vec, "tolist"):
+                        vec = vec.tolist()
+                    insert_batch.append({
+                        "id": chunk.chunk_id,
+                        "chunk_id": chunk.chunk_id,
+                        "source": chunk.source,
+                        "title": chunk.title,
+                        "raw_content": chunk.raw_content,
+                        "summary": chunk.summary,
+                        "keywords": chunk.keywords,
+                        "content_hash": chunk.content_hash,
+                        "embedding": vec if vec else [0.0] * self._embedding_dim,
+                        "metadata": {},
+                    })
 
-                        insert_batch: list[dict[str, Any]] = []
-                        batch_seen: set[str] = set()
-                        for chunk, emb in zip(batch, batch_embs):
-                            if chunk.content_hash in existing_hashes:
-                                continue
-                            if chunk.content_hash in batch_seen:
-                                continue
-                            batch_seen.add(chunk.content_hash)
-                            vec = emb
-                            if vec is not None and hasattr(vec, "tolist"):
-                                vec = vec.tolist()
-                            insert_batch.append({
-                                "id": chunk.chunk_id,
-                                "chunk_id": chunk.chunk_id,
-                                "source": chunk.source,
-                                "title": chunk.title,
-                                "raw_content": chunk.raw_content,
-                                "summary": chunk.summary,
-                                "keywords": chunk.keywords,
-                                "content_hash": chunk.content_hash,
-                                "embedding": vec if vec else [0.0] * self._embedding_dim,
-                                "metadata": {},
-                            })
+                if not insert_batch:
+                    return 0
+                async with _insert_sem:
+                    result = await self._async_query(
+                        "INSERT INTO chunks $_data RETURN id",
+                        {"_data": insert_batch},
+                    )
+                log.debug("batch@%d INSERT returned %d rows", batch_start, len(result))
+                return len(insert_batch)
 
-                        if insert_batch:
-                            result = await self._async_query(
-                                "INSERT INTO chunks $_data RETURN id",
-                                {"_data": insert_batch},
-                            )
-                            total_created += len(insert_batch)
-                            if batch_start == 0:
-                                log.info(
-                                    "first batch INSERT returned %d rows, "
-                                    "sample: %s",
-                                    len(result),
-                                    repr(result[0])[:120] if result else "empty",
-                                )
-                    except Exception as exc:
-                        log.warning(
-                            "batch insert failed at offset %d (%d created so far): %s",
-                            batch_start, total_created, exc,
-                        )
-                        raise
+            try:
+                batch_starts = list(range(0, len(chunks), self._batch_size))
+                gather_results = await asyncio.gather(
+                    *[_insert_one_batch(s) for s in batch_starts],
+                    return_exceptions=True,
+                )
+                first_exc: BaseException | None = None
+                for r in gather_results:
+                    if isinstance(r, BaseException):
+                        log.warning("batch insert failed: %s", r)
+                        if first_exc is None:
+                            first_exc = r
+                    else:
+                        total_created += r
+                if first_exc is not None:
+                    raise first_exc
             finally:
                 # Post-insert count verification (runs even on partial failure).
                 # Wrapped in try/except so a transient query failure does not
@@ -996,9 +1028,6 @@ class SurrealDBAdapter:
                 )
 
                 if use_deferred:
-                    # Use max(total_created, db_count) so the rebuild timeout
-                    # accounts for pre-existing rows during stale-sentinel
-                    # recovery, not just the rows inserted in this call.
                     rebuild_row_estimate = max(total_created, db_count)
                     await self._async_rebuild_indexes(rebuild_row_estimate)
 
