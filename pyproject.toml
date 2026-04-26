@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hydrag-core"
-version = "1.3.3"
+version = "1.4.0"
 description = "HydRAG — Multi-Headed Retrieval-Augmented Generation with CRAG supervision"
 dynamic = ["readme"]
 license = "Apache-2.0"
