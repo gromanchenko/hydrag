@@ -41,6 +41,14 @@ class HydRAGConfig:
     crag_min_relevance: float = 0.67
     crag_context_chunks: int = 5
     crag_char_limit: int = 1500
+    enable_cross_encoder_rerank: bool = False
+    cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    cross_encoder_top_k: int = 20
+    hard_filter_insufficient: bool = False
+    crag_fail_closed: bool = False
+    min_cosine_similarity: float = 0.0
+    enable_parent_child_retrieval: bool = False
+    parent_context_window: int = 1
     # V2.2: Head 0 BM25 fast-path (§3.0 spec) — on by default
     enable_fast_path: bool = True
     fast_path_bm25_threshold: float = 0.67
@@ -101,6 +109,12 @@ class HydRAGConfig:
             )
         if self.rrf_k < 1:
             raise ValueError(f"rrf_k must be >= 1, got {self.rrf_k}")
+        if self.cross_encoder_top_k < 1:
+            raise ValueError(f"cross_encoder_top_k must be >= 1, got {self.cross_encoder_top_k}")
+        if self.min_cosine_similarity < 0.0:
+            raise ValueError(f"min_cosine_similarity must be >= 0.0, got {self.min_cosine_similarity}")
+        if self.parent_context_window < 1:
+            raise ValueError(f"parent_context_window must be >= 1, got {self.parent_context_window}")
         # SurrealDB URL scheme validation
         if self.surrealdb_url:
             from urllib.parse import urlparse
@@ -156,6 +170,29 @@ class HydRAGConfig:
             ),
             crag_char_limit=int(
                 os.environ.get("HYDRAG_CRAG_CHAR_LIMIT", str(cls.crag_char_limit))
+            ),
+            enable_cross_encoder_rerank=os.environ.get(
+                "HYDRAG_ENABLE_CROSS_ENCODER_RERANK", "false"
+            ).lower()
+            in ("1", "true"),
+            cross_encoder_model=os.environ.get("HYDRAG_CROSS_ENCODER_MODEL", cls.cross_encoder_model),
+            cross_encoder_top_k=int(
+                os.environ.get("HYDRAG_CROSS_ENCODER_TOP_K", str(cls.cross_encoder_top_k))
+            ),
+            hard_filter_insufficient=os.environ.get(
+                "HYDRAG_HARD_FILTER_INSUFFICIENT", "false"
+            ).lower()
+            in ("1", "true"),
+            crag_fail_closed=os.environ.get("HYDRAG_CRAG_FAIL_CLOSED", "false").lower() in ("1", "true"),
+            min_cosine_similarity=float(
+                os.environ.get("HYDRAG_MIN_COSINE_SIMILARITY", str(cls.min_cosine_similarity))
+            ),
+            enable_parent_child_retrieval=os.environ.get(
+                "HYDRAG_ENABLE_PARENT_CHILD_RETRIEVAL", "false"
+            ).lower()
+            in ("1", "true"),
+            parent_context_window=int(
+                os.environ.get("HYDRAG_PARENT_CONTEXT_WINDOW", str(cls.parent_context_window))
             ),
             fallback_timeout_s=float(
                 os.environ.get("HYDRAG_FALLBACK_TIMEOUT_S", str(cls.fallback_timeout_s))

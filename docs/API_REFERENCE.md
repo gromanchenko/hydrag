@@ -74,8 +74,8 @@ from hydrag import HydRAGConfig
 | `crag_context_chunks` | `int` | `5` | Number of chunks sent to CRAG supervisor |
 | `crag_char_limit` | `int` | `1500` | Per-chunk character limit in CRAG prompt |
 | `enable_fast_path` | `bool` | `True` | Enable Head 0 BM25 fast-path |
-| `fast_path_bm25_threshold` | `float` | `0.6` | BM25 hit ratio threshold for fast-path early exit |
-| `fast_path_confidence_threshold` | `float` | `0.7` | BM25 score threshold to skip CRAG entirely |
+| `fast_path_bm25_threshold` | `float` | `0.67` | BM25 hit ratio threshold for fast-path early exit |
+| `fast_path_confidence_threshold` | `float` | `0.8` | BM25 score threshold to skip CRAG entirely |
 | `crag_stream` | `bool` | `True` | Parse first LLM token for early CRAG verdict |
 | `crag_mode` | `str` | `"auto"` | CRAG mode: `"auto"` (classifier if available, else LLM), `"llm"`, `"classifier"` |
 | `crag_classifier_path` | `str` | `""` | Path to ONNX classifier model for CRAG |
@@ -84,7 +84,7 @@ from hydrag import HydRAGConfig
 | `enable_head_2_crag` | `bool` | `True` | Enable CRAG supervisor head |
 | `enable_head_3a_semantic` | `bool` | `True` | Enable semantic fallback head |
 | `enable_head_3b_web` | `bool` | `False` | Enable web fallback head (also gated by `enable_web_fallback`) |
-| `fallback_timeout_s` | `float` | `30.0` | Timeout (seconds) for fallback head futures |
+| `fallback_timeout_s` | `float` | `5.0` | Timeout (seconds) for fallback head futures |
 | `rrf_head_weights` | `dict[str, float]` | `{"head_1a": 1.5, "head_1b": 1.0, "head_3a": 1.0, "head_3b": 0.8}` | Per-head RRF weight map |
 
 ### Methods

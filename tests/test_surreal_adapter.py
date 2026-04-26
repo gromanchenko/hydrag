@@ -422,7 +422,7 @@ class TestSemanticSearch:
         adapter = _make_adapter(embed_fn=embed)
         mock = _connect_adapter(adapter)
         mock.set_response(
-            "SELECT raw_content FROM chunks WHERE embedding",
+            "SELECT raw_content, vector::similarity",
             [{"status": "OK", "result": [
                 {"raw_content": "vector match"},
             ]}],
@@ -481,7 +481,7 @@ class TestSemanticSearch:
         adapter = _make_adapter(embed_fn=embed)
         mock = _connect_adapter(adapter)
         mock.set_response(
-            "SELECT raw_content FROM chunks WHERE embedding",
+            "SELECT raw_content, vector::similarity",
             [{"status": "OK", "result": [{"raw_content": "numpy match"}]}],
         )
         results = adapter.semantic_search("test")
@@ -508,14 +508,14 @@ class TestHybridSearch:
         mock = _connect_adapter(adapter)
         # Both FTS and KNN return overlapping results
         mock.set_response(
-            "SELECT raw_content FROM chunks WHERE raw_content",
+            "SELECT raw_content, math::max",
             [{"status": "OK", "result": [
                 {"raw_content": "doc A"},
                 {"raw_content": "doc B"},
             ]}],
         )
         mock.set_response(
-            "SELECT raw_content FROM chunks WHERE embedding",
+            "SELECT raw_content, vector::similarity",
             [{"status": "OK", "result": [
                 {"raw_content": "doc B"},
                 {"raw_content": "doc C"},
@@ -551,7 +551,7 @@ class TestGraphSearch:
 
         # _keyword_search_with_ids returns anchors with chunk_id
         mock.set_response(
-            "SELECT chunk_id, raw_content, math::max",
+            "SELECT chunk_id, source, raw_content, math::max",
             [{"status": "OK", "result": [
                 {"chunk_id": "chunk_abc", "raw_content": "anchor content"},
             ]}],
@@ -577,7 +577,7 @@ class TestGraphSearch:
         )
         mock = _connect_adapter(adapter)
         mock.set_response(
-            "SELECT chunk_id, raw_content, math::max",
+            "SELECT chunk_id, source, raw_content, math::max",
             [{"status": "OK", "result": [
                 {"chunk_id": "c1", "raw_content": "anchor"},
             ]}],

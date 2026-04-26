@@ -77,8 +77,8 @@ class TestHydRAGConfigFastPath:
     def test_defaults_enabled(self) -> None:
         cfg = HydRAGConfig()
         assert cfg.enable_fast_path is True
-        assert cfg.fast_path_bm25_threshold == 0.6
-        assert cfg.fast_path_confidence_threshold == 0.7
+        assert cfg.fast_path_bm25_threshold == 0.67
+        assert cfg.fast_path_confidence_threshold == 0.8
         assert cfg.crag_stream is True
 
     def test_direct_construction(self) -> None:

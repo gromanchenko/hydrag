@@ -1,5 +1,6 @@
 """HydRAG — Multi-Headed Retrieval-Augmented Generation with CRAG supervision."""
 
+from . import logging as logging
 from ._version import __version__
 from .config import HYDRAG_SPEC_VERSION, HydRAGConfig
 from .core import (
@@ -74,6 +75,7 @@ except ImportError:
 __all__ = [
     "__version__",
     "HYDRAG_SPEC_VERSION",
+    "logging",
     # Config
     "HydRAGConfig",
     # Protocols

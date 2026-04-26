@@ -81,3 +81,11 @@ def create_llm_provider(
     if token is not None:
         kwargs_oai["api_token"] = token
     return OpenAICompatProvider(**kwargs_oai)  # type: ignore[arg-type]
+
+
+def get_provider(
+    config: HydRAGConfig,
+    api_tokens: dict[str, str] | None = None,
+) -> LLMProvider:
+    """Backward-compatible alias for provider resolution."""
+    return create_llm_provider(config=config, api_tokens=api_tokens)

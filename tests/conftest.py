@@ -1,8 +1,16 @@
 """Shared test fixtures for hydrag-core tests."""
 
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
-from hydrag import HydRAGConfig, LLMProvider, StreamingLLMProvider, VectorStoreAdapter
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+# Import after path injection so plain `python -m pytest` resolves local src package.
+from hydrag import HydRAGConfig, LLMProvider, StreamingLLMProvider, VectorStoreAdapter  # noqa: E402
 
 
 @dataclass

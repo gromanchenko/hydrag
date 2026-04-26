@@ -470,7 +470,7 @@ class TestHeadsDisableHeadsConflict:
 class TestFallbackTimeout:
     def test_fallback_timeout_config_default(self) -> None:
         cfg = HydRAGConfig()
-        assert cfg.fallback_timeout_s == 30.0
+        assert cfg.fallback_timeout_s == 5.0
 
     def test_fallback_timeout_custom(self) -> None:
         cfg = HydRAGConfig(fallback_timeout_s=5.0)
